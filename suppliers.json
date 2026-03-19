@@ -1,0 +1,358 @@
+[
+  {
+    "name": "ONE'S FORTE CO.,LTD",
+    "email": "sales@ones-forte.jp",
+    "phone": "81-3-5283-5252",
+    "categoryPath": ["Spare Parts", "For Japan makers"]
+  },
+  {
+    "name": "Dai-Ichi",
+    "email": "dai-ichi <dai-ichi@dack-osaka.com>",
+    "categoryPath": ["Spare Parts", "For Japan makers"]
+  },
+  {
+    "name": "Fuji Trading Co",
+    "email": "mach-1@fujitrading.co.jp",
+    "phone": "+81-(0)78-413-2621",
+    "categoryPath": ["Spare Parts", "For Japan makers"]
+  },
+  {
+    "name": "DPC Co., Ltd.",
+    "email": "dpc@diesel-partners.com",
+    "phone": "+82 070 4077 3680",
+    "categoryPath": ["Spare Parts", "For Japan makers"]
+  },
+  {
+    "name": "DPC Co., Ltd.",
+    "email": "dpc@diesel-partners.com",
+    "phone": "+82 070 4077 3680",
+    "categoryPath": ["Spare Parts", "For Japan makers"]
+  },
+  {
+    "name": "KOPA MARINE SERVICES CO., LTD",
+    "email": "sales22@kopamarine.co.kr",
+    "phone": "+82-51-418-5176",
+    "categoryPath": ["Spare Parts", "For Japan makers"]
+  },
+  {
+    "name": "NEW CHANNEL (CHINA) INTERNATIONAL ",
+    "email": "sales@newchannelcn.com",
+    "phone": "+86 19179123244",
+    "categoryPath": ["Spare Parts", "For Japan makers"]
+  },
+  {
+    "name": "Asia Pacific Ship Supply Limited ( APS ) ",
+    "maker": ["DAIHATSU", "MAN B&W", "YANMAR", "Danfoss"],
+    "email": "sales@asia-shipsupply.com",
+    "phone": "+86 21 50682061",
+    "categoryPath": ["Spare Parts", "For Japan makers"]
+  },
+  {
+    "name": "NANTONG Z.Y.SHIPPING SUPPLY & SERVICE CO.,LTD ",
+    "maker": ["Kongsberg", "Hyundai", "Deif", "Danfoss"],
+    "email": "zysss@vip.sina.com",
+    "phone": "+ 86 513 8533 2260",
+    "categoryPath": ["Spare Parts", "For Japan makers"]
+  },
+  {
+    "name": "Linson Marine Far East Limited",
+    "email": "sales@linson-marine.com",
+    "phone": "+86 17347263075",
+    "categoryPath": ["Spare Parts", "For Japan makers"]
+  },
+  {
+    "name": "ATLANTIC GLOBAL SHIPPING DMCC",
+    "email": "supply@atlanticglobalshipping.com",
+    "categoryPath": ["Local", "India"]
+  },
+  {
+    "name": "WRIST FAR EAST (SINGAPORE) PTE LTD",
+    "email": "singapore@wrist.com",
+    "phone": "+971 56 416 9413",
+    "categoryPath": ["Local", "Singapore"]
+  },
+  {
+    "name": "RIC MARINE & OFFSHORE SUPPLIES PTE LTD",
+    "email": "sales@ric-marine.com.sg",
+    "categoryPath": ["Local", "Singapore"]
+  },
+  {
+    "name": "SEAGRANDE MARINE PTE. LTD.",
+    "email": "purchasing@seagrandemarine.com",
+    "phone": "8904 6727",
+    "categoryPath": ["Local", "Singapore"]
+  },
+  {
+    "name": "Anchor",
+    "email": "teamb@anchormarine.com.sg",
+    "categoryPath": ["Local", "Singapore"]
+  },
+  {
+    "name": "Seven Seas",
+    "email": [
+      "supply.singapore@sevenseasgroup.com",
+      "omerfaruk.unal@sevenseasgroup.com"
+    ],
+    "phone": "8904 6727",
+    "categoryPath": ["Local", "Singapore"]
+  },
+  {
+    "name": "SEVEN SEAS SHIPCHANDLERS L.L.C.",
+    "email": "supply.uae@sevenseasgroup.com",
+    "phone": "+ 30 693 656 5277",
+    "categoryPath": ["Local", "UAE"]
+  },
+  {
+    "name": "CREDENTIAL SHIP SERVICES LLC",
+    "email": "supply@credentialships.com",
+    "phone": "+971501891206",
+    "categoryPath": ["Local", "UAE"]
+  },
+  {
+    "name": "WRIST MIDDLE EAST (UAE) LLC",
+    "email": "sales@dubai.wrist.com",
+    "phone": "+971 56 416 9413",
+    "categoryPath": ["Local", "UAE"]
+  },
+  {
+    "name": "SAIFEE SHIP SPARE PARTS AND SHIP CHANDLERS LLC",
+    "email": "saifee@saifeeship.com",
+    "phone": "+971-50-4569043",
+    "categoryPath": ["Local", "UAE"]
+  },
+  {
+    "name": "ADAMAR INTERNATIONAL SHIP SUPPLY",
+    "email": "sales@adamarine.com",
+    "phone": "+902326161719",
+    "categoryPath": ["Local", "Turkey"]
+  },
+  {
+    "name": "ARMA INTERNATIONAL SHIP SUPPLY INC.",
+    "email": "arma@armashipsupply.com",
+    "phone": "+90 538 234 91 48",
+    "categoryPath": ["Local", "Turkey"]
+  },
+  {
+    "name": "SIMSEKLER GENERAL SHIP CHANDLERS INC.",
+    "email": "sales@simseklerltd.com.tr",
+    "phone": ["+90 (530) 425 03 16", "+90 (532) 589 85 71"],
+    "categoryPath": ["Local", "Turkey"]
+  },
+  {
+    "name": "Golden Ocean Marine",
+    "email": "sales@goldenoceanmarine.net",
+    "phone": ["+201212211941", "+201200400344", "+201200370736"],
+    "categoryPath": ["Local", "Egypt"]
+  },
+  {
+    "name": "MANTA SHIPPING",
+    "email": "manta@manta-eg.com",
+    "phone": ["+01009412377", "+20 10 4048 3940", "+20 66 3222213"],
+    "categoryPath": ["Local", "Egypt"]
+  },
+  {
+    "name": "F.E. SULLIVAN & CO LTD",
+    "email": ["aesullivan@fesullivan.com", "info@fesullivan.com"],
+    "phone": ["+356 99492803", "+356 21221880"],
+    "categoryPath": ["Local", "Malta"]
+  },
+  {
+    "name": "NIC COMPANY LTD",
+    "email": "info@niccompany.com.mt",
+    "phone": "+356 27228280 / 9",
+    "categoryPath": ["Local", "Malta"]
+  },
+  {
+    "name": "SALVO GRIMA GROUP LTD",
+    "email": "shipsupply@salvogrima.com.mt",
+    "phone": "+356 7959 2010",
+    "categoryPath": ["Local", "Malta"]
+  },
+  {
+    "name": "WRIST SHIP SUPPLY SPAIN S.L.",
+    "email": "algeciras@wrist.com",
+    "categoryPath": ["Local", "Spain"]
+  },
+  {
+    "name": "ALBATROS SHIPPING S.L.",
+    "email": "algeciras@albatros-shipping.com",
+    "phone": ["+34 692 16 52 01 ", "+34 692 16 52 11"],
+    "categoryPath": ["Local", "Spain"]
+  },
+  {
+    "name": "SUISCA IBERIA SL",
+    "email": "algeciras@suisca.com",
+    "phone": "+34 610 415 319",
+    "categoryPath": ["Local", "Spain"]
+  },
+  {
+    "name": "LIMANI SUPPLY GROUP SL",
+    "email": "info@limanisupply.com",
+    "categoryPath": ["Local", "Spain"]
+  },
+  {
+    "name": "WRIST-KLEVENBERG SHIP SUPPLY NL B.V",
+    "email": "rotterdam@wrist.com",
+    "categoryPath": ["Local", "Netherlands (Rotterdam)"]
+  },
+  {
+    "name": "NEKO SHIP SUPPLY BV",
+    "email": "supply@nekoship.nl",
+    "categoryPath": ["Local", "Netherlands (Rotterdam)"]
+  },
+  {
+    "name": "FUJI TRADING (MARINE) BV",
+    "email": "euroteam.stores@fujitrading.nl",
+    "phone": ["+31 10 4913 731", "+31 6 2258 1825", "+31 6 2247 5957"],
+    "categoryPath": ["Local", "Netherlands (Rotterdam)"]
+  },
+  {
+    "name": "LIMANI SUPPLY GROUP SL",
+    "email": "info@limanisupply.com",
+    "categoryPath": ["Local", "Netherlands (Rotterdam)"]
+  },
+  {
+    "name": "LIMANI SUPPLY GROUP SL",
+    "email": "info@limanisupply.com",
+    "categoryPath": ["Local", "Denmark (Skagen)"]
+  },
+  {
+    "name": "HARALD CHRISTIANSENS EFTF. A/S",
+    "email": "dsc@skawsupply.dk",
+    "phone": "+45 98441333",
+    "categoryPath": ["Local", "Denmark (Skagen)"]
+  },
+  {
+    "name": "SOROKA AGENCY APS",
+    "email": "info@soroka.dk",
+    "phone": "+45 53588635 ",
+    "categoryPath": ["Local", "Denmark (Skagen)"]
+  },
+  {
+    "name": "GLOBALMAR LLC",
+    "email": "ops@globalmar-spb.com",
+    "categoryPath": ["Local", "Baltic"]
+  },
+  {
+    "name": "NEPTUNE OVERSEAS MANAGEMENT LIMITED",
+    "email": "info@neptune-shipsupply.com",
+    "categoryPath": ["Local", "Baltic"]
+  },
+  {
+    "name": "Golden Beach ",
+    "email": "mail@friendshipmarine.com",
+    "phone": "+86 13884462107",
+    "categoryPath": ["Local", "China"]
+  },
+  {
+    "name": "Yihai Marine",
+    "email": "info@yihaimarine.com",
+    "categoryPath": ["Local", "China"]
+  },
+  {
+    "name": "UNIVERSAL BUILDING MATERIALS AND CHEMICALS COMPANY",
+    "remarks": "Egypt only",
+    "email": ["info@sipes.net", "mnafea@sipes.net"],
+    "categoryPath": ["Paint"]
+  },
+  {
+    "name": "JOTUN HELLAS LTD",
+    "email": "jotun.hellas@jotun.com",
+    "categoryPath": ["Paint"]
+  },
+  {
+    "name": "AKZO NOBEL COATINGS A.E.",
+    "email": "ip.hellas@akzonobel.com",
+    "phone": "+97430255941",
+    "categoryPath": ["Paint"]
+  },
+  {
+    "name": "TECHNAVA S.A.",
+    "email": ["kccmarinecoatings@technava.gr", "greece@kccworld.co.kr"],
+    "categoryPath": ["Paint"]
+  },
+  {
+    "name": "CHUGOKU MATINE PAINTS (HELLAS) S.A.",
+    "email": "cmp-hellas@cmpeurope.eu",
+    "phone": "+30 210 41 80 867 ",
+    "categoryPath": ["Paint"]
+  },
+  {
+    "name": "HEMPEL COATING (HELLAS) S.A.",
+    "email": "sales-GR@hempel.com",
+    "phone": "+306944942449 ",
+    "categoryPath": ["Paint"]
+  },
+  {
+    "name": "PPG HELLAS S.A.",
+    "email": "csmarine.gr@ppg.com",
+    "phone": "+30 6946562258",
+    "categoryPath": ["Paint"]
+  },
+  {
+    "name": "LBC INTERNATIONAL LIMITED",
+    "email": "sales@lbcbunkering.com",
+    "phone": "+30 6986593650",
+    "categoryPath": ["Lub oil"]
+  },
+  {
+    "name": "SCANDI TRADING FZE ",
+    "email": ["info@scandioiltrading.com", "chka@scandioiltrading.com"],
+    "phone": "+30 694 065 1233",
+    "categoryPath": ["Lub oil"]
+  },
+  {
+    "name": "EPSILON MARINE ENTERPRISES S.A.",
+    "email": "bunkers@epsilonmarine.com",
+    "phone": "+30 210 45 12 623- 45 172 74",
+    "categoryPath": ["Lub oil"]
+  },
+  {
+    "name": "ENMAR HELLAS S.A.",
+    "email": ["sales@enmar.gr", "jchosni@enmar.gr"],
+    "phone": "+30 6988442674",
+    "categoryPath": ["Lub oil"]
+  },
+  {
+    "name": "TECHNAVA S.A.",
+    "email": [
+      "enoclub@technava.gr",
+      "s.belos@technava.gr",
+      "d.kirkilesi@technava.gr"
+    ],
+    "phone": "+30 6944 665 356",
+    "categoryPath": ["Lub oil"]
+  },
+  {
+    "name": "GULF OIL MARINE HELLAS",
+    "email": [
+      "gulfoil@gulf-marine.gr",
+      "tonia.divoli@gulf-marine.gr",
+      "nick.papathanassiou@gulf-marine.gr",
+      "mariza.hatziemmanouel@gulf-marine.gr"
+    ],
+    "phone": "+30 6947 261 746",
+    "categoryPath": ["Lub oil"]
+  },
+  {
+    "name": "WILHELMSEN SHIPS SERVICE AS (WSS)",
+    "email": "wss.cs.uae.products@wilhelmsen.com",
+    "phone": ":+971 501595414",
+    "categoryPath": ["Chemicals and welding"]
+  },
+  {
+    "name": "MCMG WORLDWIDE LIMITED ( MERICHEM )",
+    "email": [
+      "m.filopoulou@marichem-marigases.com",
+      "operationsmanager@marichem-marigases.biz"
+    ],
+    "phone": ":+30 6944798510 ",
+    "categoryPath": ["Chemicals and welding"]
+  },
+  {
+    "name": "India Additional Spares",
+    "email": "spares@example.com",
+    "phone": "+91-333-333-3333",
+    "categoryPath": ["Spare Parts", "Additional", "India"]
+  }
+]
