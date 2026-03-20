@@ -4,8 +4,9 @@ const { config } = require("./config");
 const { initDb } = require("./db");
 const { encryptText, decryptText } = require("./crypto");
 
-const db = initDb(config.databasePath);
+const db = initDb(config.databaseUrl);
 const bot = new Telegraf(config.botToken);
+console.log("Using Postgres DB");
 const addFlow = new Map();
 const searchFlow = new Map();
 const deleteSupplierFlow = new Set();
@@ -16,20 +17,20 @@ function userDisplayName(from) {
   return `${first} ${last}`.trim() || from.username || `User ${from.id}`;
 }
 
-function ensureUser(from) {
+async function ensureUser(from) {
   let role = "pending";
   if (from.id === config.ownerId) {
     role = "owner";
   }
 
-  db.upsertUser({
+  await db.upsertUser({
     telegramId: from.id,
     username: from.username || null,
     fullName: userDisplayName(from),
     role,
   });
 
-  const user = db.getUser(from.id);
+  const user = await db.getUser(from.id);
   if (from.id === config.ownerId && user.role !== "owner") {
     return db.setRole(from.id, "owner");
   }
@@ -88,9 +89,11 @@ function canRemoveTarget(actor, target) {
   return false;
 }
 
-function categoryButtons(parentId, mode) {
+async function categoryButtons(parentId, mode) {
   const rows =
-    parentId == null ? db.getRootCategories() : db.getChildren(parentId);
+    parentId == null
+      ? await db.getRootCategories()
+      : await db.getChildren(parentId);
   return rows.map((c) => [Markup.button.callback(c.name, `${mode}:${c.id}`)]);
 }
 
@@ -129,10 +132,7 @@ async function openMainMenu(ctx) {
   rows.push(["Help"]);
   rows.push(["Leave bot"]);
 
-  await ctx.reply(
-    "Choose an action:",
-    Markup.keyboard(rows).resize(),
-  );
+  await ctx.reply("Choose an action:", Markup.keyboard(rows).resize());
 }
 
 async function showHelp(ctx, user) {
@@ -171,7 +171,7 @@ async function showHelp(ctx, user) {
 async function ensureApproved(ctx, next) {
   if (!ctx.from) return;
 
-  const user = ensureUser(ctx.from);
+  const user = await ensureUser(ctx.from);
   ctx.state.user = user;
 
   if (!isApprovedRole(user.role)) {
@@ -188,7 +188,7 @@ async function showPendingUsers(ctx, role) {
     return;
   }
 
-  const pending = db.listPending();
+  const pending = await db.listPending();
   if (pending.length === 0) {
     await ctx.reply("No pending users.");
     return;
@@ -201,7 +201,12 @@ async function showPendingUsers(ctx, role) {
       Markup.inlineKeyboard([
         [Markup.button.callback("Approve user", `approve:${p.telegramId}`)],
         [Markup.button.callback("Make admin", `makeadmin:${p.telegramId}`)],
-        [Markup.button.callback("Remove from bot", `removeuser:${p.telegramId}`)],
+        [
+          Markup.button.callback(
+            "Remove from bot",
+            `removeuser:${p.telegramId}`,
+          ),
+        ],
       ]),
     );
   }
@@ -214,9 +219,9 @@ async function showManageableUsers(ctx) {
     return;
   }
 
-  const users = db
-    .listUsers()
-    .filter((target) => canRemoveTarget(actor, target));
+  const users = (await db.listUsers()).filter((target) =>
+    canRemoveTarget(actor, target),
+  );
 
   if (users.length === 0) {
     await ctx.reply("No removable users found.");
@@ -234,7 +239,12 @@ async function showManageableUsers(ctx) {
     await ctx.reply(
       text,
       Markup.inlineKeyboard([
-        [Markup.button.callback("Remove from bot", `removeuser:${user.telegramId}`)],
+        [
+          Markup.button.callback(
+            "Remove from bot",
+            `removeuser:${user.telegramId}`,
+          ),
+        ],
       ]),
     );
   }
@@ -245,7 +255,7 @@ async function leaveBot(ctx) {
     return;
   }
 
-  const user = db.getUser(ctx.from.id) || ensureUser(ctx.from);
+  const user = (await db.getUser(ctx.from.id)) || (await ensureUser(ctx.from));
   if (!user) {
     await ctx.reply("You are not registered in the bot.");
     return;
@@ -258,8 +268,11 @@ async function leaveBot(ctx) {
 
   addFlow.delete(ctx.from.id);
   searchFlow.delete(ctx.from.id);
-  db.removeUser(ctx.from.id);
-  await ctx.reply("You have been removed from the bot. If needed, send /start to request access again.", Markup.removeKeyboard());
+  await db.removeUser(ctx.from.id);
+  await ctx.reply(
+    "You have been removed from the bot. If needed, send /start to request access again.",
+    Markup.removeKeyboard(),
+  );
 }
 
 async function removeUserByAdmin(ctx, userId) {
@@ -269,7 +282,7 @@ async function removeUserByAdmin(ctx, userId) {
     return false;
   }
 
-  const target = db.getUser(userId);
+  const target = await db.getUser(userId);
   if (!target) {
     await ctx.reply("User not found.");
     return false;
@@ -282,7 +295,7 @@ async function removeUserByAdmin(ctx, userId) {
 
   addFlow.delete(userId);
   searchFlow.delete(userId);
-  db.removeUser(userId);
+  await db.removeUser(userId);
   await ctx.reply(`Removed from bot: ${target.fullName} (${userId}).`);
   return true;
 }
@@ -301,7 +314,7 @@ async function promptRemoveUserConfirmation(ctx, userId, options = {}) {
     return false;
   }
 
-  const target = db.getUser(userId);
+  const target = await db.getUser(userId);
   if (!target) {
     await ctx.reply("User not found.");
     return false;
@@ -356,7 +369,7 @@ async function askSearchMode(ctx) {
   await ctx.reply("Choose search mode:", searchModeKeyboard());
 }
 
-function renderSupplier(supplier, options = {}) {
+async function renderSupplier(supplier, options = {}) {
   const email = decryptText(supplier.emailEncrypted, config.contactsSecret);
   const phone = supplier.phoneEncrypted
     ? decryptText(supplier.phoneEncrypted, config.contactsSecret)
@@ -372,7 +385,9 @@ function renderSupplier(supplier, options = {}) {
     lines.push(`  <b>Remarks:</b> ${escapeHtml(supplier.remarks)}`);
   }
   if (options.includeCategory) {
-    const categoryPath = escapeHtml(db.getCategoryPath(supplier.categoryId).join(" > "));
+    const categoryPath = escapeHtml(
+      (await db.getCategoryPath(supplier.categoryId)).join(" > "),
+    );
     lines.push(`  Category: ${categoryPath}`);
   }
   lines.push(`  Email: ${escapeHtml(email)}`);
@@ -389,21 +404,26 @@ async function runSupplierSearch(ctx, query, mode) {
     return;
   }
 
-  const matches = db.searchSuppliers(text, mode);
+  const matches = await db.searchSuppliers(text, mode);
   if (matches.length === 0) {
     await ctx.reply("No suppliers found.");
     return;
   }
 
-  const lines = matches.map((supplier) =>
-    renderSupplier(supplier, {
-      includeCategory: true,
-      includeId: canManageSuppliers(ctx.state.user.role),
-    }),
+  const lines = await Promise.all(
+    matches.map((supplier) =>
+      renderSupplier(supplier, {
+        includeCategory: true,
+        includeId: canManageSuppliers(ctx.state.user.role),
+      }),
+    ),
   );
-  await ctx.reply(`Found ${matches.length} supplier(s):\n\n${lines.join("\n\n")}`, {
-    parse_mode: "HTML",
-  });
+  await ctx.reply(
+    `Found ${matches.length} supplier(s):\n\n${lines.join("\n\n")}`,
+    {
+      parse_mode: "HTML",
+    },
+  );
 }
 
 function supplierRemovalConfirmKeyboard(supplierId) {
@@ -423,7 +443,7 @@ async function promptRemoveSupplierConfirmation(ctx, supplierId, options = {}) {
     return false;
   }
 
-  const supplier = db.getSupplierById(supplierId);
+  const supplier = await db.getSupplierById(supplierId);
   if (!supplier) {
     if (options.editCurrentMessage) {
       await ctx.editMessageText("Supplier not found.");
@@ -446,7 +466,7 @@ async function promptRemoveSupplierConfirmation(ctx, supplierId, options = {}) {
 bot.start(async (ctx) => {
   if (!ctx.from) return;
 
-  const user = ensureUser(ctx.from);
+  const user = await ensureUser(ctx.from);
   ctx.state.user = user;
   if (!isApprovedRole(user.role)) {
     await ctx.reply("Your request is pending. Admin must approve access.");
@@ -460,7 +480,7 @@ bot.start(async (ctx) => {
 bot.command("help", async (ctx) => {
   if (!ctx.from) return;
 
-  const user = ensureUser(ctx.from);
+  const user = await ensureUser(ctx.from);
   if (!isApprovedRole(user.role)) {
     await ctx.reply("Only approved users can use this bot.");
     return;
@@ -469,7 +489,7 @@ bot.command("help", async (ctx) => {
 });
 
 bot.command("browse", ensureApproved, async (ctx) => {
-  const buttons = categoryButtons(null, "browse");
+  const buttons = await categoryButtons(null, "browse");
   await ctx.reply("Select category:", Markup.inlineKeyboard(buttons));
 });
 
@@ -504,13 +524,13 @@ bot.command("approve", ensureApproved, async (ctx) => {
     return;
   }
 
-  const target = db.getUser(userId);
+  const target = await db.getUser(userId);
   if (!target) {
     await ctx.reply("User not found. Ask them to run /start first.");
     return;
   }
 
-  db.setRole(userId, "supplier");
+  await db.setRole(userId, "supplier");
   await ctx.reply(`User ${userId} approved.`);
 });
 
@@ -527,7 +547,7 @@ bot.command("makeadmin", ensureApproved, async (ctx) => {
     return;
   }
 
-  const target = db.getUser(userId);
+  const target = await db.getUser(userId);
   if (!target) {
     await ctx.reply("User not found. Ask them to run /start first.");
     return;
@@ -538,7 +558,7 @@ bot.command("makeadmin", ensureApproved, async (ctx) => {
     return;
   }
 
-  db.setRole(userId, "admin");
+  await db.setRole(userId, "admin");
   await ctx.reply(`User ${userId} is now admin.`);
 });
 
@@ -595,8 +615,8 @@ bot.command("listadmins", ensureApproved, async (ctx) => {
     return;
   }
 
-  const owner = db.listUsersByRole("owner");
-  const admins = db.listUsersByRole("admin");
+  const owner = await db.listUsersByRole("owner");
+  const admins = await db.listUsersByRole("admin");
   const rows = [...owner, ...admins];
 
   if (rows.length === 0) {
@@ -611,7 +631,7 @@ bot.command("listadmins", ensureApproved, async (ctx) => {
 });
 
 bot.hears("Browse suppliers", ensureApproved, async (ctx) => {
-  const buttons = categoryButtons(null, "browse");
+  const buttons = await categoryButtons(null, "browse");
   await ctx.reply("Select category:", Markup.inlineKeyboard(buttons));
 });
 
@@ -649,7 +669,9 @@ bot.on("text", ensureApproved, async (ctx, next) => {
     if (deleteSupplierFlow.has(ctx.from.id)) {
       const supplierId = Number(ctx.message.text.trim());
       if (!Number.isInteger(supplierId)) {
-        await ctx.reply("Supplier ID must be a number. Send supplier ID or /cancel.");
+        await ctx.reply(
+          "Supplier ID must be a number. Send supplier ID or /cancel.",
+        );
         return;
       }
 
@@ -665,7 +687,9 @@ bot.on("text", ensureApproved, async (ctx, next) => {
       return;
     }
 
-    await ctx.reply("I did not understand this message. Please choose one of the actions below.");
+    await ctx.reply(
+      "I did not understand this message. Please choose one of the actions below.",
+    );
     await openMainMenu(ctx);
     return;
   }
@@ -692,7 +716,14 @@ bot.on("text", ensureApproved, async (ctx, next) => {
 
   if (flow.step === "maker") {
     const normalized = text.toLowerCase();
-    if (normalized === "-" || normalized === "skip" || normalized === "none" || normalized === "no" || normalized === "нет" || normalized === "пропустить") {
+    if (
+      normalized === "-" ||
+      normalized === "skip" ||
+      normalized === "none" ||
+      normalized === "no" ||
+      normalized === "нет" ||
+      normalized === "пропустить"
+    ) {
       flow.maker = null;
     } else {
       flow.maker = text;
@@ -732,7 +763,9 @@ bot.on("text", ensureApproved, async (ctx, next) => {
     flow.step = "remarks";
     addFlow.set(ctx.from.id, flow);
 
-    await ctx.reply("Send remarks (optional). Example: Egypt only. Send '-' to skip.");
+    await ctx.reply(
+      "Send remarks (optional). Example: Egypt only. Send '-' to skip.",
+    );
     return;
   }
 
@@ -754,7 +787,7 @@ bot.on("text", ensureApproved, async (ctx, next) => {
     flow.step = "category";
     addFlow.set(ctx.from.id, flow);
 
-    const buttons = categoryButtons(null, "addcat");
+    const buttons = await categoryButtons(null, "addcat");
     await ctx.reply(
       "Choose category for this supplier:",
       Markup.inlineKeyboard(buttons),
@@ -766,18 +799,45 @@ bot.on("text", ensureApproved, async (ctx, next) => {
 bot.action(/^(browse|addcat):(\d+)$/, ensureApproved, async (ctx) => {
   const mode = ctx.match[1];
   const categoryId = Number(ctx.match[2]);
-  const category = db.getCategory(categoryId);
+  const category = await db.getCategory(categoryId);
 
   if (!category) {
     await ctx.answerCbQuery("Category not found");
     return;
   }
 
-  const children = db.getChildren(categoryId);
+  const children = await db.getChildren(categoryId);
+  const isLeaf = children.length === 0;
+
+  if (mode === "browse" && isLeaf) {
+    await ctx.answerCbQuery();
+    const suppliers = await db.getSuppliersByCategory(categoryId);
+    const backKeyboard = Markup.inlineKeyboard([
+      [Markup.button.callback("Back to root", "browse_root")],
+    ]);
+    if (suppliers.length === 0) {
+      await ctx.editMessageText(
+        `No suppliers in ${escapeHtml(category.name)}.`,
+        backKeyboard,
+      );
+      return;
+    }
+    const includeAdminControls = canManageSuppliers(ctx.state.user.role);
+    const lines = await Promise.all(
+      suppliers.map((s) =>
+        renderSupplier(s, { includeId: includeAdminControls }),
+      ),
+    );
+    await ctx.editMessageText(
+      `Suppliers in ${escapeHtml(category.name)}:\n\n${lines.join("\n\n")}`,
+      { parse_mode: "HTML", ...backKeyboard },
+    );
+    return;
+  }
+
   const buttons = children.map((child) => [
     Markup.button.callback(child.name, `${mode}:${child.id}`),
   ]);
-  const isLeaf = children.length === 0;
   buttons.push(...addChooseButtons(categoryId, mode, isLeaf));
 
   await ctx.editMessageText(
@@ -791,7 +851,7 @@ bot.action(/^(browse|addcat):(\d+)$/, ensureApproved, async (ctx) => {
 
 bot.action(/^(browse|addcat)_root$/, ensureApproved, async (ctx) => {
   const mode = ctx.match[1];
-  const buttons = categoryButtons(null, mode);
+  const buttons = await categoryButtons(null, mode);
   await ctx.editMessageText("Select category:", Markup.inlineKeyboard(buttons));
   await ctx.answerCbQuery();
 });
@@ -803,13 +863,13 @@ bot.action(/^approve:(\d+)$/, ensureApproved, async (ctx) => {
   }
 
   const userId = Number(ctx.match[1]);
-  const target = db.getUser(userId);
+  const target = await db.getUser(userId);
   if (!target) {
     await ctx.answerCbQuery("User not found");
     return;
   }
 
-  db.setRole(userId, "supplier");
+  await db.setRole(userId, "supplier");
   await ctx.editMessageText(`Approved: ${target.fullName} (${userId})`);
   await ctx.answerCbQuery("Approved");
 });
@@ -821,7 +881,7 @@ bot.action(/^makeadmin:(\d+)$/, ensureApproved, async (ctx) => {
   }
 
   const userId = Number(ctx.match[1]);
-  const target = db.getUser(userId);
+  const target = await db.getUser(userId);
   if (!target) {
     await ctx.answerCbQuery("User not found");
     return;
@@ -832,7 +892,7 @@ bot.action(/^makeadmin:(\d+)$/, ensureApproved, async (ctx) => {
     return;
   }
 
-  db.setRole(userId, "admin");
+  await db.setRole(userId, "admin");
   await ctx.editMessageText(`Now admin: ${target.fullName} (${userId})`);
   await ctx.answerCbQuery("Updated");
 });
@@ -848,7 +908,7 @@ bot.action(/^removeuser:(\d+)$/, ensureApproved, async (ctx) => {
 bot.action(/^removeconfirm:(\d+)$/, ensureApproved, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const actor = ctx.state.user;
-  const target = db.getUser(userId);
+  const target = await db.getUser(userId);
 
   if (!canManageUsers(actor.role)) {
     await ctx.answerCbQuery("Forbidden");
@@ -869,7 +929,7 @@ bot.action(/^removeconfirm:(\d+)$/, ensureApproved, async (ctx) => {
 
   addFlow.delete(userId);
   searchFlow.delete(userId);
-  db.removeUser(userId);
+  await db.removeUser(userId);
   await ctx.editMessageText(`Removed from bot: ${target.fullName} (${userId})`);
   await ctx.answerCbQuery("Removed");
 });
@@ -894,15 +954,17 @@ bot.action(/^delsupplierconfirm:(\d+)$/, ensureApproved, async (ctx) => {
   }
 
   const supplierId = Number(ctx.match[1]);
-  const supplier = db.getSupplierById(supplierId);
+  const supplier = await db.getSupplierById(supplierId);
   if (!supplier) {
     await ctx.editMessageText("Supplier not found.");
     await ctx.answerCbQuery("Not found");
     return;
   }
 
-  db.removeSupplier(supplierId);
-  await ctx.editMessageText(`Supplier deleted: #${supplier.id} ${supplier.name}`);
+  await db.removeSupplier(supplierId);
+  await ctx.editMessageText(
+    `Supplier deleted: #${supplier.id} ${supplier.name}`,
+  );
   await ctx.answerCbQuery("Deleted");
 });
 
@@ -926,19 +988,19 @@ bot.action(/^searchmode:(name|maker)$/, ensureApproved, async (ctx) => {
 
 bot.action(/^browse_choose:(\d+)$/, ensureApproved, async (ctx) => {
   const categoryId = Number(ctx.match[1]);
-  const category = db.getCategory(categoryId);
+  const category = await db.getCategory(categoryId);
 
   if (!category) {
     await ctx.answerCbQuery("Category not found");
     return;
   }
 
-  if (db.getChildren(categoryId).length > 0) {
+  if ((await db.getChildren(categoryId)).length > 0) {
     await ctx.answerCbQuery("Choose a final subcategory");
     return;
   }
 
-  const suppliers = db.getSuppliersByCategory(categoryId);
+  const suppliers = await db.getSuppliersByCategory(categoryId);
   if (suppliers.length === 0) {
     await ctx.reply(`No suppliers in ${category.name}.`);
     await ctx.answerCbQuery();
@@ -946,14 +1008,19 @@ bot.action(/^browse_choose:(\d+)$/, ensureApproved, async (ctx) => {
   }
 
   const includeAdminControls = canManageSuppliers(ctx.state.user.role);
-  const lines = suppliers.map((supplier) =>
-    renderSupplier(supplier, {
-      includeId: includeAdminControls,
-    }),
+  const lines = await Promise.all(
+    suppliers.map((supplier) =>
+      renderSupplier(supplier, {
+        includeId: includeAdminControls,
+      }),
+    ),
   );
-  await ctx.reply(`Suppliers in ${escapeHtml(category.name)}:\n\n${lines.join("\n\n")}`, {
-    parse_mode: "HTML",
-  });
+  await ctx.reply(
+    `Suppliers in ${escapeHtml(category.name)}:\n\n${lines.join("\n\n")}`,
+    {
+      parse_mode: "HTML",
+    },
+  );
   await ctx.answerCbQuery();
 });
 
@@ -970,19 +1037,19 @@ bot.action(/^addcat_choose:(\d+)$/, ensureApproved, async (ctx) => {
   }
 
   const categoryId = Number(ctx.match[1]);
-  const category = db.getCategory(categoryId);
+  const category = await db.getCategory(categoryId);
 
   if (!category) {
     await ctx.answerCbQuery("Category not found");
     return;
   }
 
-  if (db.getChildren(categoryId).length > 0) {
+  if ((await db.getChildren(categoryId)).length > 0) {
     await ctx.answerCbQuery("Choose a final subcategory");
     return;
   }
 
-  db.addSupplier({
+  await db.addSupplier({
     name: flow.name,
     maker: flow.maker || null,
     remarks: flow.remarks || null,

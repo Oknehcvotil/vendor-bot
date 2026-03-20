@@ -5,7 +5,7 @@ const { config } = require("./config");
 const { initDb } = require("./db");
 const { encryptText } = require("./crypto");
 
-const db = initDb(config.databasePath);
+const db = initDb(config.databaseUrl);
 
 function usage() {
   console.log(
@@ -35,40 +35,46 @@ function getArgs() {
   };
 }
 
-function ensureOwnerUser() {
-  db.upsertUser({
+async function ensureOwnerUser() {
+  await db.upsertUser({
     telegramId: config.ownerId,
     username: null,
     fullName: "Owner",
     role: "owner",
   });
 
-  const owner = db.getUser(config.ownerId);
+  const owner = await db.getUser(config.ownerId);
   if (!owner || owner.role !== "owner") {
-    db.setRole(config.ownerId, "owner");
+    await db.setRole(config.ownerId, "owner");
   }
 }
 
-function resolveCategoryPath(categoryPath) {
+async function resolveCategoryPath(categoryPath) {
   if (!Array.isArray(categoryPath) || categoryPath.length === 0) {
     throw new Error("categoryPath must be a non-empty array");
   }
 
-  let current = db.getRootCategories().find((category) => category.name === categoryPath[0]);
+  let current = (await db.getRootCategories()).find(
+    (category) => category.name === categoryPath[0],
+  );
   if (!current) {
     throw new Error(`Unknown root category: ${categoryPath[0]}`);
   }
 
   for (let index = 1; index < categoryPath.length; index += 1) {
     const name = categoryPath[index];
-    current = db.getChildren(current.id).find((category) => category.name === name);
+    current = (await db.getChildren(current.id)).find(
+      (category) => category.name === name,
+    );
     if (!current) {
       throw new Error(`Unknown category path: ${categoryPath.join(" > ")}`);
     }
   }
 
-  if (db.getChildren(current.id).length > 0) {
-    throw new Error(`Category path must end at a final subcategory: ${categoryPath.join(" > ")}`);
+  if ((await db.getChildren(current.id)).length > 0) {
+    throw new Error(
+      `Category path must end at a final subcategory: ${categoryPath.join(" > ")}`,
+    );
   }
 
   return current;
@@ -89,7 +95,8 @@ function validateRecord(record, index) {
     throw new Error(`Record ${index + 1}: email is required`);
   }
   if (record.phone !== undefined && record.phone !== null) {
-    const phoneIsString = typeof record.phone === "string" && record.phone.trim();
+    const phoneIsString =
+      typeof record.phone === "string" && record.phone.trim();
     const phoneIsArray =
       Array.isArray(record.phone) &&
       record.phone.length > 0 &&
@@ -102,10 +109,13 @@ function validateRecord(record, index) {
     }
   }
   if (!Array.isArray(record.categoryPath) || record.categoryPath.length === 0) {
-    throw new Error(`Record ${index + 1}: categoryPath must be a non-empty array`);
+    throw new Error(
+      `Record ${index + 1}: categoryPath must be a non-empty array`,
+    );
   }
   if (record.maker !== undefined && record.maker !== null) {
-    const makerIsString = typeof record.maker === "string" && record.maker.trim();
+    const makerIsString =
+      typeof record.maker === "string" && record.maker.trim();
     const makerIsArray =
       Array.isArray(record.maker) &&
       record.maker.length > 0 &&
@@ -175,16 +185,16 @@ function loadImportFile(filePath) {
   return data;
 }
 
-function importSuppliers(filePath, replace) {
+async function importSuppliers(filePath, replace) {
   const records = loadImportFile(filePath);
-  ensureOwnerUser();
+  await ensureOwnerUser();
 
   if (replace) {
-    db.clearSuppliers();
+    await db.clearSuppliers();
   }
 
   for (const record of records) {
-    const category = resolveCategoryPath(record.categoryPath);
+    const category = await resolveCategoryPath(record.categoryPath);
     const email = normalizeTextField(record.email);
     if (!email) {
       throw new Error(`Record with name '${record.name}': email is required`);
@@ -194,7 +204,7 @@ function importSuppliers(filePath, replace) {
     const remarks = normalizeTextField(record.remarks);
     const phone = normalizeTextField(record.phone);
 
-    db.addSupplier({
+    await db.addSupplier({
       name: record.name.trim(),
       maker,
       remarks,
@@ -206,13 +216,19 @@ function importSuppliers(filePath, replace) {
   }
 
   console.log(`Imported ${records.length} suppliers from ${filePath}`);
-  console.log(replace ? "Mode: replace existing suppliers" : "Mode: append to existing suppliers");
+  console.log(
+    replace
+      ? "Mode: replace existing suppliers"
+      : "Mode: append to existing suppliers",
+  );
 }
 
-try {
-  const { filePath, replace } = getArgs();
-  importSuppliers(filePath, replace);
-} catch (error) {
-  console.error(error.message);
-  process.exit(1);
-}
+(async () => {
+  try {
+    const { filePath, replace } = getArgs();
+    await importSuppliers(filePath, replace);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+})();

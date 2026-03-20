@@ -12,7 +12,7 @@ const config = {
   botToken: required("BOT_TOKEN"),
   ownerId: Number(required("OWNER_ID")),
   contactsSecret: required("CONTACTS_SECRET"),
-  databasePath: (process.env.DATABASE_PATH || "data/vendors.db").trim(),
+  databaseUrl: required("DATABASE_URL"),
 };
 
 if (!Number.isInteger(config.ownerId)) {

@@ -19,7 +19,7 @@ Telegram bot for supplier directory with strict access control:
 - Help button in menu with English main-feature guide
 - Supplier list with categories and subcategories
 - Contact data encryption at rest (`AES-256-GCM`)
-- Local encrypted JSON storage file
+- PostgreSQL storage
 
 ## Categories Included
 
@@ -70,7 +70,7 @@ npm install
 - `BOT_TOKEN` - Telegram bot token from BotFather
 - `OWNER_ID` - your Telegram numeric user id
 - `CONTACTS_SECRET` - long random secret for contact encryption
-- `DATABASE_PATH` - optional path to encrypted JSON data file (default `data/vendors.db`)
+- `DATABASE_URL` - PostgreSQL connection string
 
 Example secret generator:
 
@@ -83,6 +83,88 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```bash
 npm start
 ```
+
+## Deploy To Railway
+
+This bot uses PostgreSQL in Railway.
+
+1. Push project to GitHub.
+2. In Railway: `New Project` -> `Deploy from GitHub Repo` -> select this repository.
+3. Add PostgreSQL service in the same Railway project.
+4. Open bot service settings and set Start Command:
+
+```bash
+npm start
+```
+
+5. In bot service variables, set:
+
+- `BOT_TOKEN` = Telegram bot token
+- `OWNER_ID` = your Telegram numeric user id
+- `CONTACTS_SECRET` = long random secret
+- `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`
+
+6. Redeploy service.
+7. Open service logs and check that bot started without config errors.
+
+Important:
+
+- Keep `DATABASE_URL` private. Never commit it.
+- If you change database service, update `DATABASE_URL` in bot variables.
+
+Secret generator:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
+## Deploy To Railway Without Git
+
+You can deploy directly from your local folder using Railway CLI.
+
+1. Install Railway CLI (Windows PowerShell):
+
+```powershell
+npm i -g @railway/cli
+```
+
+2. In project folder, login:
+
+```bash
+railway login
+```
+
+3. Create a new Railway project and link this folder:
+
+```bash
+railway init
+```
+
+4. In Railway dashboard, create PostgreSQL service in the same project.
+5. In bot service variables, set:
+
+- `BOT_TOKEN` = Telegram bot token
+- `OWNER_ID` = your Telegram numeric user id
+- `CONTACTS_SECRET` = long random secret
+- `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`
+
+6. Deploy current local folder (without Git):
+
+```bash
+railway up
+```
+
+7. Check logs:
+
+```bash
+railway logs
+```
+
+Useful commands:
+
+- `railway status` - show linked project/service
+- `railway open` - open project in browser
+- `railway variables` - list environment variables
 
 ## Commands
 
@@ -120,7 +202,7 @@ Valid examples:
 Invalid example:
 
 ```json
-{"categoryPath": ["Spare Parts", "Additional"]}
+{ "categoryPath": ["Spare Parts", "Additional"] }
 ```
 
 Run import:

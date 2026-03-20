@@ -1,3 +1,4 @@
 node_modules/
 .env
-data/
+data/vendors.db
+suppliers.json

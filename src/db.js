@@ -1,11 +1,6 @@
-const fs = require("fs");
-const path = require("path");
+const { Pool } = require("pg");
 
 const { CATEGORY_TREE } = require("./categories");
-
-function nowIso() {
-  return new Date().toISOString();
-}
 
 function buildCategoryIndex() {
   const categories = [];
@@ -26,186 +21,272 @@ function buildCategoryIndex() {
   return categories;
 }
 
-function syncCategoryTree(state) {
-  if (!Array.isArray(state.categories)) {
-    state.categories = [];
+function toUser(row) {
+  if (!row) {
+    return null;
   }
 
-  let changed = false;
-  let nextId = state.categories.reduce((max, c) => Math.max(max, c.id || 0), 0) + 1;
-
-  function findCategory(name, parentId) {
-    return state.categories.find((c) => c.name === name && c.parentId === parentId) || null;
-  }
-
-  function walk(nodes, parentId) {
-    for (const node of nodes) {
-      let current = findCategory(node.name, parentId);
-      if (!current) {
-        current = { id: nextId, name: node.name, parentId };
-        nextId += 1;
-        state.categories.push(current);
-        changed = true;
-      }
-
-      if (Array.isArray(node.children) && node.children.length > 0) {
-        walk(node.children, current.id);
-      }
-    }
-  }
-
-  walk(CATEGORY_TREE, null);
-  return changed;
+  return {
+    telegramId: Number(row.telegram_id),
+    username: row.username,
+    fullName: row.full_name,
+    role: row.role,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
 }
 
-function initDb(databasePath) {
-  const dir = path.dirname(databasePath);
-  fs.mkdirSync(dir, { recursive: true });
-
-  if (!fs.existsSync(databasePath)) {
-    const initial = {
-      users: [],
-      categories: buildCategoryIndex(),
-      suppliers: [],
-      counters: {
-        supplierId: 1,
-      },
-    };
-    fs.writeFileSync(databasePath, JSON.stringify(initial, null, 2), "utf8");
+function toCategory(row) {
+  if (!row) {
+    return null;
   }
 
-  function load() {
-    const text = fs.readFileSync(databasePath, "utf8");
-    const state = JSON.parse(text);
-    if (!Array.isArray(state.categories) || state.categories.length === 0) {
-      state.categories = buildCategoryIndex();
-    }
-    const categoriesUpdated = syncCategoryTree(state);
-    if (!state.counters || typeof state.counters.supplierId !== "number") {
-      state.counters = {
-        supplierId: Math.max(1, ...state.suppliers.map((s) => s.id + 1), 1),
-      };
-    }
+  return {
+    id: row.id,
+    name: row.name,
+    parentId: row.parent_id,
+  };
+}
 
-    let suppliersUpdated = false;
-    if (Array.isArray(state.suppliers)) {
-      for (const supplier of state.suppliers) {
-        if (!("maker" in supplier)) {
-          supplier.maker = null;
-          suppliersUpdated = true;
-        }
-        if (!("remarks" in supplier)) {
-          supplier.remarks = null;
-          suppliersUpdated = true;
-        }
-        if (!("phoneEncrypted" in supplier)) {
-          supplier.phoneEncrypted = null;
-          suppliersUpdated = true;
-        }
-      }
-    }
-
-    if (categoriesUpdated || suppliersUpdated) {
-      save(state);
-    }
-    return state;
+function toSupplier(row) {
+  if (!row) {
+    return null;
   }
 
-  function save(state) {
-    const tmp = `${databasePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), "utf8");
-    fs.renameSync(tmp, databasePath);
+  return {
+    id: Number(row.id),
+    name: row.name,
+    maker: row.maker,
+    remarks: row.remarks,
+    categoryId: row.category_id,
+    emailEncrypted: row.email_encrypted,
+    phoneEncrypted: row.phone_encrypted,
+    createdBy: Number(row.created_by),
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+async function initSchema(pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      telegram_id BIGINT PRIMARY KEY,
+      username TEXT,
+      full_name TEXT NOT NULL,
+      role TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS categories (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      parent_id INTEGER REFERENCES categories(id) ON DELETE RESTRICT,
+      UNIQUE(name, parent_id)
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      maker TEXT,
+      remarks TEXT,
+      category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+      email_encrypted TEXT NOT NULL,
+      phone_encrypted TEXT,
+      created_by BIGINT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);");
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS idx_suppliers_category_id ON suppliers(category_id);",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS idx_suppliers_name_lower ON suppliers(LOWER(name));",
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS idx_suppliers_maker_lower ON suppliers(LOWER(maker));",
+  );
+}
+
+async function syncCategoryTree(pool) {
+  const categories = buildCategoryIndex();
+
+  for (const category of categories) {
+    await pool.query(
+      `
+      INSERT INTO categories (id, name, parent_id)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (id)
+      DO UPDATE SET
+        name = EXCLUDED.name,
+        parent_id = EXCLUDED.parent_id
+      `,
+      [category.id, category.name, category.parentId],
+    );
+  }
+}
+
+function initDb(connectionString) {
+  const pool = new Pool({ connectionString });
+  const ready = (async () => {
+    await initSchema(pool);
+    await syncCategoryTree(pool);
+  })();
+
+  async function getUser(telegramId) {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      SELECT telegram_id, username, full_name, role, created_at, updated_at
+      FROM users
+      WHERE telegram_id = $1
+      `,
+      [telegramId],
+    );
+    return toUser(rows[0]);
   }
 
-  function getUser(telegramId) {
-    const state = load();
-    return state.users.find((u) => u.telegramId === telegramId) || null;
+  async function upsertUser({ telegramId, username, fullName, role }) {
+    await ready;
+
+    const { rows } = await pool.query(
+      `
+      INSERT INTO users (telegram_id, username, full_name, role)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (telegram_id)
+      DO UPDATE SET
+        username = EXCLUDED.username,
+        full_name = EXCLUDED.full_name,
+        updated_at = NOW()
+      RETURNING telegram_id, username, full_name, role, created_at, updated_at
+      `,
+      [telegramId, username, fullName, role],
+    );
+
+    return toUser(rows[0]);
   }
 
-  function upsertUser({ telegramId, username, fullName, role }) {
-    const state = load();
-    const existing = state.users.find((u) => u.telegramId === telegramId);
-    if (!existing) {
-      state.users.push({
-        telegramId,
-        username,
-        fullName,
-        role,
-        createdAt: nowIso(),
-        updatedAt: nowIso(),
-      });
-    } else {
-      existing.username = username;
-      existing.fullName = fullName;
-      existing.updatedAt = nowIso();
-    }
-    save(state);
-    return state.users.find((u) => u.telegramId === telegramId);
+  async function setRole(telegramId, role) {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      UPDATE users
+      SET role = $2,
+          updated_at = NOW()
+      WHERE telegram_id = $1
+      RETURNING telegram_id, username, full_name, role, created_at, updated_at
+      `,
+      [telegramId, role],
+    );
+
+    return toUser(rows[0]);
   }
 
-  function setRole(telegramId, role) {
-    const state = load();
-    const user = state.users.find((u) => u.telegramId === telegramId);
-    if (!user) {
-      return null;
-    }
-    user.role = role;
-    user.updatedAt = nowIso();
-    save(state);
-    return user;
+  async function listPending() {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      SELECT telegram_id, username, full_name, role, created_at, updated_at
+      FROM users
+      WHERE role = 'pending'
+      ORDER BY created_at ASC
+      `,
+    );
+
+    return rows.map(toUser);
   }
 
-  function listPending() {
-    const state = load();
-    return state.users
-      .filter((u) => u.role === "pending")
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  async function listUsersByRole(role) {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      SELECT telegram_id, username, full_name, role, created_at, updated_at
+      FROM users
+      WHERE role = $1
+      ORDER BY full_name ASC
+      `,
+      [role],
+    );
+
+    return rows.map(toUser);
   }
 
-  function listUsersByRole(role) {
-    const state = load();
-    return state.users
-      .filter((u) => u.role === role)
-      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  async function listUsers() {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      SELECT telegram_id, username, full_name, role, created_at, updated_at
+      FROM users
+      ORDER BY full_name ASC
+      `,
+    );
+
+    return rows.map(toUser);
   }
 
-  function listUsers() {
-    const state = load();
-    return [...state.users].sort((a, b) => a.fullName.localeCompare(b.fullName));
+  async function removeUser(telegramId) {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      DELETE FROM users
+      WHERE telegram_id = $1
+      RETURNING telegram_id, username, full_name, role, created_at, updated_at
+      `,
+      [telegramId],
+    );
+
+    return toUser(rows[0]);
   }
 
-  function removeUser(telegramId) {
-    const state = load();
-    const index = state.users.findIndex((u) => u.telegramId === telegramId);
-    if (index === -1) {
-      return null;
-    }
+  async function getRootCategories() {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      SELECT id, name, parent_id
+      FROM categories
+      WHERE parent_id IS NULL
+      ORDER BY name ASC
+      `,
+    );
 
-    const [removed] = state.users.splice(index, 1);
-    save(state);
-    return removed;
+    return rows.map(toCategory);
   }
 
-  function getRootCategories() {
-    const state = load();
-    return state.categories
-      .filter((c) => c.parentId === null)
-      .sort((a, b) => a.name.localeCompare(b.name));
+  async function getChildren(parentId) {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      SELECT id, name, parent_id
+      FROM categories
+      WHERE parent_id = $1
+      ORDER BY name ASC
+      `,
+      [parentId],
+    );
+
+    return rows.map(toCategory);
   }
 
-  function getChildren(parentId) {
-    const state = load();
-    return state.categories
-      .filter((c) => c.parentId === parentId)
-      .sort((a, b) => a.name.localeCompare(b.name));
+  async function getCategory(id) {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      SELECT id, name, parent_id
+      FROM categories
+      WHERE id = $1
+      `,
+      [id],
+    );
+
+    return toCategory(rows[0]);
   }
 
-  function getCategory(id) {
-    const state = load();
-    return state.categories.find((c) => c.id === id) || null;
-  }
-
-  function addSupplier({
+  async function addSupplier({
     name,
     maker,
     remarks,
@@ -214,91 +295,128 @@ function initDb(databasePath) {
     phoneEncrypted,
     createdBy,
   }) {
-    const state = load();
-    const supplier = {
-      id: state.counters.supplierId,
-      name,
-      maker: maker || null,
-      remarks: remarks || null,
-      categoryId,
-      emailEncrypted,
-      phoneEncrypted: phoneEncrypted || null,
-      createdBy,
-      createdAt: nowIso(),
-    };
+    await ready;
 
-    state.counters.supplierId += 1;
-    state.suppliers.push(supplier);
-    save(state);
-    return supplier;
+    const { rows } = await pool.query(
+      `
+      INSERT INTO suppliers
+      (name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by, created_at
+      `,
+      [
+        name,
+        maker || null,
+        remarks || null,
+        categoryId,
+        emailEncrypted,
+        phoneEncrypted || null,
+        createdBy,
+      ],
+    );
+
+    return toSupplier(rows[0]);
   }
 
-  function clearSuppliers() {
-    const state = load();
-    state.suppliers = [];
-    state.counters.supplierId = 1;
-    save(state);
+  async function clearSuppliers() {
+    await ready;
+    await pool.query("TRUNCATE TABLE suppliers RESTART IDENTITY;");
   }
 
-  function getSuppliersByCategory(categoryId) {
-    const state = load();
-    return state.suppliers
-      .filter((s) => s.categoryId === categoryId)
-      .sort((a, b) => a.name.localeCompare(b.name));
+  async function getSuppliersByCategory(categoryId) {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      SELECT id, name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by, created_at
+      FROM suppliers
+      WHERE category_id = $1
+      ORDER BY name ASC
+      `,
+      [categoryId],
+    );
+
+    return rows.map(toSupplier);
   }
 
-  function getSupplierById(supplierId) {
-    const state = load();
-    return state.suppliers.find((s) => s.id === supplierId) || null;
+  async function getSupplierById(supplierId) {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      SELECT id, name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by, created_at
+      FROM suppliers
+      WHERE id = $1
+      `,
+      [supplierId],
+    );
+
+    return toSupplier(rows[0]);
   }
 
-  function removeSupplier(supplierId) {
-    const state = load();
-    const index = state.suppliers.findIndex((s) => s.id === supplierId);
-    if (index === -1) {
-      return null;
-    }
+  async function removeSupplier(supplierId) {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      DELETE FROM suppliers
+      WHERE id = $1
+      RETURNING id, name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by, created_at
+      `,
+      [supplierId],
+    );
 
-    const [removed] = state.suppliers.splice(index, 1);
-    save(state);
-    return removed;
+    return toSupplier(rows[0]);
   }
 
-  function searchSuppliers(query, mode = "any") {
-    const state = load();
-    const needle = query.trim().toLowerCase();
+  async function searchSuppliers(query, mode = "any") {
+    await ready;
+    const needle = query.trim();
     if (!needle) {
       return [];
     }
 
-    return state.suppliers
-      .filter((supplier) => {
-        const byName = supplier.name.toLowerCase().includes(needle);
-        const byMaker = (supplier.maker || "").toLowerCase().includes(needle);
+    const likeNeedle = `%${needle.toLowerCase()}%`;
+    let sql = `
+      SELECT id, name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by, created_at
+      FROM suppliers
+    `;
+    let params = [likeNeedle];
 
-        if (mode === "name") {
-          return byName;
-        }
-        if (mode === "maker") {
-          return byMaker;
-        }
-        return byName || byMaker;
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  function getCategoryPath(categoryId) {
-    const state = load();
-    const byId = new Map(state.categories.map((c) => [c.id, c]));
-
-    const path = [];
-    let current = byId.get(categoryId) || null;
-    while (current) {
-      path.unshift(current.name);
-      current = current.parentId == null ? null : byId.get(current.parentId) || null;
+    if (mode === "name") {
+      sql += " WHERE LOWER(name) LIKE $1";
+    } else if (mode === "maker") {
+      sql += " WHERE LOWER(COALESCE(maker, '')) LIKE $1";
+    } else {
+      sql += " WHERE LOWER(name) LIKE $1 OR LOWER(COALESCE(maker, '')) LIKE $1";
     }
 
-    return path;
+    sql += " ORDER BY name ASC";
+
+    const { rows } = await pool.query(sql, params);
+    return rows.map(toSupplier);
+  }
+
+  async function getCategoryPath(categoryId) {
+    await ready;
+    const { rows } = await pool.query(
+      `
+      WITH RECURSIVE category_path AS (
+        SELECT id, name, parent_id, 0 AS depth
+        FROM categories
+        WHERE id = $1
+
+        UNION ALL
+
+        SELECT c.id, c.name, c.parent_id, cp.depth + 1
+        FROM categories c
+        JOIN category_path cp ON c.id = cp.parent_id
+      )
+      SELECT name
+      FROM category_path
+      ORDER BY depth DESC
+      `,
+      [categoryId],
+    );
+
+    return rows.map((row) => row.name);
   }
 
   return {
