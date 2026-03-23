@@ -142,6 +142,38 @@ function validateRecord(record, index) {
       );
     }
   }
+
+  if (record.currency !== undefined && record.currency !== null) {
+    const currencyIsString =
+      typeof record.currency === "string" && record.currency.trim();
+    const currencyIsArray =
+      Array.isArray(record.currency) &&
+      record.currency.length > 0 &&
+      record.currency.some((value) => typeof value === "string" && value.trim());
+
+    if (!currencyIsString && !currencyIsArray) {
+      throw new Error(
+        `Record ${index + 1}: currency must be a non-empty string or array when provided`,
+      );
+    }
+  }
+
+  if (record.paymentTerms !== undefined && record.paymentTerms !== null) {
+    const paymentTermsIsString =
+      typeof record.paymentTerms === "string" && record.paymentTerms.trim();
+    const paymentTermsIsArray =
+      Array.isArray(record.paymentTerms) &&
+      record.paymentTerms.length > 0 &&
+      record.paymentTerms.some(
+        (value) => typeof value === "string" && value.trim(),
+      );
+
+    if (!paymentTermsIsString && !paymentTermsIsArray) {
+      throw new Error(
+        `Record ${index + 1}: paymentTerms must be a non-empty string or array when provided`,
+      );
+    }
+  }
 }
 
 function normalizeTextField(value) {
@@ -202,12 +234,16 @@ async function importSuppliers(filePath, replace) {
 
     const maker = normalizeTextField(record.maker);
     const remarks = normalizeTextField(record.remarks);
+    const currency = normalizeTextField(record.currency);
+    const paymentTerms = normalizeTextField(record.paymentTerms);
     const phone = normalizeTextField(record.phone);
 
     await db.addSupplier({
       name: record.name.trim(),
       maker,
       remarks,
+      currency,
+      paymentTerms,
       categoryId: category.id,
       emailEncrypted: encryptText(email, config.contactsSecret),
       phoneEncrypted: phone ? encryptText(phone, config.contactsSecret) : null,

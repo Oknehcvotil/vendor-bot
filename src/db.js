@@ -58,6 +58,8 @@ function toSupplier(row) {
     name: row.name,
     maker: row.maker,
     remarks: row.remarks,
+    currency: row.currency,
+    paymentTerms: row.payment_terms,
     categoryId: row.category_id,
     emailEncrypted: row.email_encrypted,
     phoneEncrypted: row.phone_encrypted,
@@ -93,6 +95,8 @@ async function initSchema(pool) {
       name TEXT NOT NULL,
       maker TEXT,
       remarks TEXT,
+      currency TEXT,
+      payment_terms TEXT,
       category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
       email_encrypted TEXT NOT NULL,
       phone_encrypted TEXT,
@@ -100,6 +104,13 @@ async function initSchema(pool) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+
+  await pool.query(
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS currency TEXT;",
+  );
+  await pool.query(
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS payment_terms TEXT;",
+  );
 
   await pool.query("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);");
   await pool.query(
@@ -290,6 +301,8 @@ function initDb(connectionString) {
     name,
     maker,
     remarks,
+    currency,
+    paymentTerms,
     categoryId,
     emailEncrypted,
     phoneEncrypted,
@@ -300,14 +313,16 @@ function initDb(connectionString) {
     const { rows } = await pool.query(
       `
       INSERT INTO suppliers
-      (name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by, created_at
+      (name, maker, remarks, currency, payment_terms, category_id, email_encrypted, phone_encrypted, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING id, name, maker, remarks, currency, payment_terms, category_id, email_encrypted, phone_encrypted, created_by, created_at
       `,
       [
         name,
         maker || null,
         remarks || null,
+        currency || null,
+        paymentTerms || null,
         categoryId,
         emailEncrypted,
         phoneEncrypted || null,
@@ -327,7 +342,7 @@ function initDb(connectionString) {
     await ready;
     const { rows } = await pool.query(
       `
-      SELECT id, name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by, created_at
+      SELECT id, name, maker, remarks, currency, payment_terms, category_id, email_encrypted, phone_encrypted, created_by, created_at
       FROM suppliers
       WHERE category_id = $1
       ORDER BY name ASC
@@ -342,7 +357,7 @@ function initDb(connectionString) {
     await ready;
     const { rows } = await pool.query(
       `
-      SELECT id, name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by, created_at
+      SELECT id, name, maker, remarks, currency, payment_terms, category_id, email_encrypted, phone_encrypted, created_by, created_at
       FROM suppliers
       WHERE id = $1
       `,
@@ -358,7 +373,7 @@ function initDb(connectionString) {
       `
       DELETE FROM suppliers
       WHERE id = $1
-      RETURNING id, name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by, created_at
+      RETURNING id, name, maker, remarks, currency, payment_terms, category_id, email_encrypted, phone_encrypted, created_by, created_at
       `,
       [supplierId],
     );
@@ -375,7 +390,7 @@ function initDb(connectionString) {
 
     const likeNeedle = `%${needle.toLowerCase()}%`;
     let sql = `
-      SELECT id, name, maker, remarks, category_id, email_encrypted, phone_encrypted, created_by, created_at
+      SELECT id, name, maker, remarks, currency, payment_terms, category_id, email_encrypted, phone_encrypted, created_by, created_at
       FROM suppliers
     `;
     let params = [likeNeedle];

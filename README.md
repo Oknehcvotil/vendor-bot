@@ -221,6 +221,8 @@ Import validation checks:
 - `name` is required
 - `maker` is optional
 - `remarks` is optional (example: `Egypt only`)
+- `currency` is optional (example: `USD`)
+- `paymentTerms` is optional (example: `credit / prepayment`)
 - `email` is required
 - `phone` is optional
 - `categoryPath` must exist and end at a final allowed category

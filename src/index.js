@@ -120,6 +120,18 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function isSkipValue(text) {
+  const normalized = text.toLowerCase();
+  return (
+    normalized === "-" ||
+    normalized === "skip" ||
+    normalized === "none" ||
+    normalized === "no" ||
+    normalized === "нет" ||
+    normalized === "пропустить"
+  );
+}
+
 async function openMainMenu(ctx) {
   const role = ctx.state.user.role;
   const rows = [["Browse suppliers", "Search suppliers"]];
@@ -383,6 +395,12 @@ async function renderSupplier(supplier, options = {}) {
   }
   if (supplier.remarks) {
     lines.push(`  <b>Remarks:</b> ${escapeHtml(supplier.remarks)}`);
+  }
+  if (supplier.currency) {
+    lines.push(`  Currency: ${escapeHtml(supplier.currency)}`);
+  }
+  if (supplier.paymentTerms) {
+    lines.push(`  Payment terms: ${escapeHtml(supplier.paymentTerms)}`);
   }
   if (options.includeCategory) {
     const categoryPath = escapeHtml(
@@ -715,15 +733,7 @@ bot.on("text", ensureApproved, async (ctx, next) => {
   }
 
   if (flow.step === "maker") {
-    const normalized = text.toLowerCase();
-    if (
-      normalized === "-" ||
-      normalized === "skip" ||
-      normalized === "none" ||
-      normalized === "no" ||
-      normalized === "нет" ||
-      normalized === "пропустить"
-    ) {
+    if (isSkipValue(text)) {
       flow.maker = null;
     } else {
       flow.maker = text;
@@ -747,15 +757,7 @@ bot.on("text", ensureApproved, async (ctx, next) => {
   }
 
   if (flow.step === "phone") {
-    const normalized = text.toLowerCase();
-    if (
-      normalized === "-" ||
-      normalized === "skip" ||
-      normalized === "none" ||
-      normalized === "no" ||
-      normalized === "нет" ||
-      normalized === "пропустить"
-    ) {
+    if (isSkipValue(text)) {
       flow.phone = null;
     } else {
       flow.phone = text;
@@ -770,18 +772,38 @@ bot.on("text", ensureApproved, async (ctx, next) => {
   }
 
   if (flow.step === "remarks") {
-    const normalized = text.toLowerCase();
-    if (
-      normalized === "-" ||
-      normalized === "skip" ||
-      normalized === "none" ||
-      normalized === "no" ||
-      normalized === "нет" ||
-      normalized === "пропустить"
-    ) {
+    if (isSkipValue(text)) {
       flow.remarks = null;
     } else {
       flow.remarks = text;
+    }
+
+    flow.step = "currency";
+    addFlow.set(ctx.from.id, flow);
+    await ctx.reply("Send payment currency (optional). Example: USD. Send '-' to skip.");
+    return;
+  }
+
+  if (flow.step === "currency") {
+    if (isSkipValue(text)) {
+      flow.currency = null;
+    } else {
+      flow.currency = text;
+    }
+
+    flow.step = "paymentTerms";
+    addFlow.set(ctx.from.id, flow);
+    await ctx.reply(
+      "Send payment terms (optional). Example: credit / prepayment. Send '-' to skip.",
+    );
+    return;
+  }
+
+  if (flow.step === "paymentTerms") {
+    if (isSkipValue(text)) {
+      flow.paymentTerms = null;
+    } else {
+      flow.paymentTerms = text;
     }
 
     flow.step = "category";
@@ -1053,6 +1075,8 @@ bot.action(/^addcat_choose:(\d+)$/, ensureApproved, async (ctx) => {
     name: flow.name,
     maker: flow.maker || null,
     remarks: flow.remarks || null,
+    currency: flow.currency || null,
+    paymentTerms: flow.paymentTerms || null,
     categoryId,
     emailEncrypted: encryptText(flow.email, config.contactsSecret),
     phoneEncrypted: flow.phone
