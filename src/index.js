@@ -1,503 +1,85 @@
 const { Telegraf, Markup } = require("telegraf");
 
 const { config } = require("./config");
-const { initDb } = require("./db");
-const { encryptText, decryptText } = require("./crypto");
+const { db } = require("./store");
+const {
+  isApprovedRole,
+  canApprove,
+  canManageSuppliers,
+  isOwner,
+} = require("./roles");
+const { ensureUser, ensureApproved } = require("./middleware");
+const {
+  addFlow,
+  searchFlow,
+  deleteSupplierFlow,
+  editSupplierSelectFlow,
+  editSupplierFlow,
+  clearUserFlows,
+} = require("./flows");
+const {
+  categoryButtons,
+  askSearchMode,
+  openMainMenu,
+  showHelp,
+} = require("./handlers/menu");
+const {
+  showPendingUsers,
+  showManageableUsers,
+  leaveBot,
+  promptRemoveUserConfirmation,
+} = require("./handlers/users");
+const {
+  runSupplierSearch,
+  promptRemoveSupplierConfirmation,
+  beginDeleteSupplier,
+  openSupplierEditMenu,
+  beginEditSupplierSelectById,
+  beginAddSupplier,
+  handleAddSupplierText,
+  handleEditSupplierText,
+} = require("./handlers/suppliers");
+const { registerInlineActions } = require("./handlers/actions");
 
-const db = initDb(config.databaseUrl);
 const bot = new Telegraf(config.botToken);
-console.log("Using Postgres DB");
-const addFlow = new Map();
-const searchFlow = new Map();
-const deleteSupplierFlow = new Set();
 
-function userDisplayName(from) {
-  const first = from.first_name || "";
-  const last = from.last_name || "";
-  return `${first} ${last}`.trim() || from.username || `User ${from.id}`;
+function getCommandArg(ctx) {
+  return ctx.message.text.split(" ").slice(1).join(" ").trim();
 }
 
-async function ensureUser(from) {
-  let role = "pending";
-  if (from.id === config.ownerId) {
-    role = "owner";
-  }
-
-  await db.upsertUser({
-    telegramId: from.id,
-    username: from.username || null,
-    fullName: userDisplayName(from),
-    role,
-  });
-
-  const user = await db.getUser(from.id);
-  if (from.id === config.ownerId && user.role !== "owner") {
-    return db.setRole(from.id, "owner");
-  }
-  return user;
-}
-
-function isApprovedRole(role) {
-  return (
-    role === "owner" ||
-    role === "admin" ||
-    role === "supplier" ||
-    role === "user"
-  );
-}
-
-function canApprove(role) {
-  return role === "owner" || role === "admin";
-}
-
-function canManageSuppliers(role) {
-  return role === "owner" || role === "admin";
-}
-
-function isOwner(role) {
-  return role === "owner";
-}
-
-function roleLabel(role) {
-  if (role === "owner") return "Owner";
-  if (role === "admin") return "Admin";
-  if (role === "supplier" || role === "user") return "Supplier";
-  return "Pending";
-}
-
-function canManageUsers(role) {
-  return role === "owner" || role === "admin";
-}
-
-function canRemoveTarget(actor, target) {
-  if (!target) {
+async function requireCommandRole(ctx, checkRole, denyMessage) {
+  if (!checkRole(ctx.state.user.role)) {
+    await ctx.reply(denyMessage);
     return false;
   }
-  if (target.role === "owner" || target.telegramId === config.ownerId) {
-    return false;
-  }
-  if (actor.role === "owner") {
-    return actor.telegramId !== target.telegramId;
-  }
-  if (actor.role === "admin") {
-    return (
-      target.role === "supplier" ||
-      target.role === "user" ||
-      target.role === "pending"
-    );
-  }
-  return false;
-}
-
-async function categoryButtons(parentId, mode) {
-  const rows =
-    parentId == null
-      ? await db.getRootCategories()
-      : await db.getChildren(parentId);
-  return rows.map((c) => [Markup.button.callback(c.name, `${mode}:${c.id}`)]);
-}
-
-function addChooseButtons(categoryId, mode, canSelectCurrent) {
-  const buttons = [];
-  if (canSelectCurrent) {
-    buttons.push([
-      Markup.button.callback(
-        "Select this category",
-        `${mode}_choose:${categoryId}`,
-      ),
-    ]);
-  }
-  buttons.push([Markup.button.callback("Back to root", `${mode}_root`)]);
-  return buttons;
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function isSkipValue(text) {
-  const normalized = text.toLowerCase();
-  return (
-    normalized === "-" ||
-    normalized === "skip" ||
-    normalized === "none" ||
-    normalized === "no" ||
-    normalized === "нет" ||
-    normalized === "пропустить"
-  );
-}
-
-async function openMainMenu(ctx) {
-  const role = ctx.state.user.role;
-  const rows = [["Browse suppliers", "Search suppliers"]];
-
-  if (canManageUsers(role)) {
-    rows.push(["Add supplier", "Delete supplier"]);
-    rows.push(["Pending users", "Users"]);
-  }
-
-  rows.push(["Help"]);
-  rows.push(["Leave bot"]);
-
-  await ctx.reply("Choose an action:", Markup.keyboard(rows).resize());
-}
-
-async function showHelp(ctx, user) {
-  const lines = [
-    "Help - Main Features",
-    "",
-    "For all approved users:",
-    "- /start: open main menu",
-    "- /browse: view suppliers by category",
-    "- /search: choose search mode (name or maker)",
-    "- /leave: remove your own access from bot",
-  ];
-
-  if (canManageUsers(user.role)) {
-    lines.push("", "Admin features:");
-    lines.push(
-      "- /pending: view pending access requests",
-      "- /approve <telegram_id>: approve supplier access",
-      "- /users: list users that can be removed",
-      "- /removeuser <telegram_id>: remove user (with Yes/No confirm)",
-      "- /addsupplier: add a new supplier",
-      "- /deletesupplier <supplier_id>: delete supplier (with Yes/No confirm)",
-      "- /listadmins: list admins and owner",
-    );
-  }
-
-  if (isOwner(user.role)) {
-    lines.push("", "Owner only:");
-    lines.push("- /makeadmin <telegram_id>: grant admin role");
-  }
-
-  lines.push("", "Utility:", "- /cancel: cancel current add/search flow");
-  await ctx.reply(lines.join("\n"));
-}
-
-async function ensureApproved(ctx, next) {
-  if (!ctx.from) return;
-
-  const user = await ensureUser(ctx.from);
-  ctx.state.user = user;
-
-  if (!isApprovedRole(user.role)) {
-    await ctx.reply("Access denied. Wait for admin approval.");
-    return;
-  }
-
-  await next();
-}
-
-async function showPendingUsers(ctx, role) {
-  if (!canApprove(role)) {
-    await ctx.reply("Only admin can view pending users.");
-    return;
-  }
-
-  const pending = await db.listPending();
-  if (pending.length === 0) {
-    await ctx.reply("No pending users.");
-    return;
-  }
-
-  for (const p of pending) {
-    const text = `ID: ${p.telegramId}\nName: ${p.fullName}\nUsername: @${p.username || "-"}`;
-    await ctx.reply(
-      text,
-      Markup.inlineKeyboard([
-        [Markup.button.callback("Approve user", `approve:${p.telegramId}`)],
-        [Markup.button.callback("Make admin", `makeadmin:${p.telegramId}`)],
-        [
-          Markup.button.callback(
-            "Remove from bot",
-            `removeuser:${p.telegramId}`,
-          ),
-        ],
-      ]),
-    );
-  }
-}
-
-async function showManageableUsers(ctx) {
-  const actor = ctx.state.user;
-  if (!canManageUsers(actor.role)) {
-    await ctx.reply("Only admin can manage users.");
-    return;
-  }
-
-  const users = (await db.listUsers()).filter((target) =>
-    canRemoveTarget(actor, target),
-  );
-
-  if (users.length === 0) {
-    await ctx.reply("No removable users found.");
-    return;
-  }
-
-  for (const user of users) {
-    const text = [
-      `ID: ${user.telegramId}`,
-      `Name: ${user.fullName}`,
-      `Username: @${user.username || "-"}`,
-      `Role: ${roleLabel(user.role)}`,
-    ].join("\n");
-
-    await ctx.reply(
-      text,
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            "Remove from bot",
-            `removeuser:${user.telegramId}`,
-          ),
-        ],
-      ]),
-    );
-  }
-}
-
-async function leaveBot(ctx) {
-  if (!ctx.from) {
-    return;
-  }
-
-  const user = (await db.getUser(ctx.from.id)) || (await ensureUser(ctx.from));
-  if (!user) {
-    await ctx.reply("You are not registered in the bot.");
-    return;
-  }
-
-  if (user.role === "owner" || user.telegramId === config.ownerId) {
-    await ctx.reply("Owner cannot leave the bot.");
-    return;
-  }
-
-  addFlow.delete(ctx.from.id);
-  searchFlow.delete(ctx.from.id);
-  await db.removeUser(ctx.from.id);
-  await ctx.reply(
-    "You have been removed from the bot. If needed, send /start to request access again.",
-    Markup.removeKeyboard(),
-  );
-}
-
-async function removeUserByAdmin(ctx, userId) {
-  const actor = ctx.state.user;
-  if (!canManageUsers(actor.role)) {
-    await ctx.reply("Only admin can remove users.");
-    return false;
-  }
-
-  const target = await db.getUser(userId);
-  if (!target) {
-    await ctx.reply("User not found.");
-    return false;
-  }
-
-  if (!canRemoveTarget(actor, target)) {
-    await ctx.reply("You cannot remove this user.");
-    return false;
-  }
-
-  addFlow.delete(userId);
-  searchFlow.delete(userId);
-  await db.removeUser(userId);
-  await ctx.reply(`Removed from bot: ${target.fullName} (${userId}).`);
   return true;
 }
 
-function removalConfirmKeyboard(userId) {
-  return Markup.inlineKeyboard([
-    [Markup.button.callback("Yes", `removeconfirm:${userId}`)],
-    [Markup.button.callback("No", `removecancel:${userId}`)],
-  ]);
+async function parseCommandId(ctx, usageMessage) {
+  const id = Number(getCommandArg(ctx));
+  if (!Number.isInteger(id)) {
+    await ctx.reply(usageMessage);
+    return null;
+  }
+  return id;
 }
 
-async function promptRemoveUserConfirmation(ctx, userId, options = {}) {
-  const actor = ctx.state.user;
-  if (!canManageUsers(actor.role)) {
-    await ctx.reply("Only admin can remove users.");
-    return false;
-  }
-
-  const target = await db.getUser(userId);
-  if (!target) {
-    await ctx.reply("User not found.");
-    return false;
-  }
-
-  if (!canRemoveTarget(actor, target)) {
-    await ctx.reply("You cannot remove this user.");
-    return false;
-  }
-
-  const text = `Remove user ${target.fullName} (${userId}) from bot?`;
-  if (options.editCurrentMessage) {
-    await ctx.editMessageText(text, removalConfirmKeyboard(userId));
-  } else {
-    await ctx.reply(text, removalConfirmKeyboard(userId));
-  }
-
-  return true;
-}
-
-async function beginAddSupplier(ctx, role) {
-  if (!canApprove(role)) {
-    await ctx.reply("Only admin can add suppliers.");
-    return;
-  }
-
-  addFlow.set(ctx.from.id, {
-    step: "name",
-  });
-
-  await ctx.reply("Send supplier name (or /cancel).");
-}
-
-async function beginDeleteSupplier(ctx) {
-  if (!canManageSuppliers(ctx.state.user.role)) {
-    await ctx.reply("Only admin can delete suppliers.");
-    return;
-  }
-
-  deleteSupplierFlow.add(ctx.from.id);
-  await ctx.reply("Send supplier ID to delete (or /cancel).");
-}
-
-function searchModeKeyboard() {
-  return Markup.inlineKeyboard([
-    [Markup.button.callback("Search by supplier name", "searchmode:name")],
-    [Markup.button.callback("Search by maker", "searchmode:maker")],
-  ]);
-}
-
-async function askSearchMode(ctx) {
-  await ctx.reply("Choose search mode:", searchModeKeyboard());
-}
-
-async function renderSupplier(supplier, options = {}) {
-  const email = decryptText(supplier.emailEncrypted, config.contactsSecret);
-  const phone = supplier.phoneEncrypted
-    ? decryptText(supplier.phoneEncrypted, config.contactsSecret)
-    : null;
-  const lines = [`• ${escapeHtml(supplier.name)}`];
-  if (options.includeId) {
-    lines.push(`  ID: ${supplier.id}`);
-  }
-  if (supplier.maker) {
-    lines.push(`  Maker: ${escapeHtml(supplier.maker)}`);
-  }
-  if (supplier.remarks) {
-    lines.push(`  <b>Remarks:</b> ${escapeHtml(supplier.remarks)}`);
-  }
-  if (supplier.currency) {
-    lines.push(`  Currency: ${escapeHtml(supplier.currency)}`);
-  }
-  if (supplier.paymentTerms) {
-    lines.push(`  Payment terms: ${escapeHtml(supplier.paymentTerms)}`);
-  }
-  if (options.includeCategory) {
-    const categoryPath = escapeHtml(
-      (await db.getCategoryPath(supplier.categoryId)).join(" > "),
-    );
-    lines.push(`  Category: ${categoryPath}`);
-  }
-  lines.push(`  Email: ${escapeHtml(email)}`);
-  if (phone) {
-    lines.push(`  Phone: ${escapeHtml(phone)}`);
-  }
-  return lines.join("\n");
-}
-
-async function runSupplierSearch(ctx, query, mode) {
-  const text = (query || "").trim();
-  if (text.length < 2) {
-    await ctx.reply("Search text must be at least 2 characters.");
-    return;
-  }
-
-  const matches = await db.searchSuppliers(text, mode);
-  if (matches.length === 0) {
-    await ctx.reply("No suppliers found.");
-    return;
-  }
-
-  const lines = await Promise.all(
-    matches.map((supplier) =>
-      renderSupplier(supplier, {
-        includeCategory: true,
-        includeId: canManageSuppliers(ctx.state.user.role),
-      }),
-    ),
-  );
-  await ctx.reply(
-    `Found ${matches.length} supplier(s):\n\n${lines.join("\n\n")}`,
-    {
-      parse_mode: "HTML",
-    },
-  );
-}
-
-function supplierRemovalConfirmKeyboard(supplierId) {
-  return Markup.inlineKeyboard([
-    [Markup.button.callback("Yes", `delsupplierconfirm:${supplierId}`)],
-    [Markup.button.callback("No", `delsuppliercancel:${supplierId}`)],
-  ]);
-}
-
-async function promptRemoveSupplierConfirmation(ctx, supplierId, options = {}) {
-  if (!canManageSuppliers(ctx.state.user.role)) {
-    if (options.editCurrentMessage) {
-      await ctx.editMessageText("Only admin can delete suppliers.");
-    } else {
-      await ctx.reply("Only admin can delete suppliers.");
-    }
-    return false;
-  }
-
-  const supplier = await db.getSupplierById(supplierId);
-  if (!supplier) {
-    if (options.editCurrentMessage) {
-      await ctx.editMessageText("Supplier not found.");
-    } else {
-      await ctx.reply("Supplier not found.");
-    }
-    return false;
-  }
-
-  const text = `Delete supplier #${supplier.id}: ${supplier.name}?`;
-  if (options.editCurrentMessage) {
-    await ctx.editMessageText(text, supplierRemovalConfirmKeyboard(supplierId));
-  } else {
-    await ctx.reply(text, supplierRemovalConfirmKeyboard(supplierId));
-  }
-
-  return true;
-}
+// ─── Commands ─────────────────────────────────────────────────────────────────
 
 bot.start(async (ctx) => {
   if (!ctx.from) return;
-
   const user = await ensureUser(ctx.from);
   ctx.state.user = user;
   if (!isApprovedRole(user.role)) {
     await ctx.reply("Your request is pending. Admin must approve access.");
     return;
   }
-
   await ctx.reply(`Welcome, ${user.fullName}.`);
   await openMainMenu(ctx);
 });
 
 bot.command("help", async (ctx) => {
   if (!ctx.from) return;
-
   const user = await ensureUser(ctx.from);
   if (!isApprovedRole(user.role)) {
     await ctx.reply("Only approved users can use this bot.");
@@ -512,12 +94,11 @@ bot.command("browse", ensureApproved, async (ctx) => {
 });
 
 bot.command("search", ensureApproved, async (ctx) => {
-  const query = ctx.message.text.split(" ").slice(1).join(" ").trim();
+  const query = getCommandArg(ctx);
   if (!query) {
     await askSearchMode(ctx);
     return;
   }
-
   await runSupplierSearch(ctx, query, "any");
 });
 
@@ -530,52 +111,51 @@ bot.command("users", ensureApproved, async (ctx) => {
 });
 
 bot.command("approve", ensureApproved, async (ctx) => {
-  if (!canApprove(ctx.state.user.role)) {
-    await ctx.reply("Only admin can approve users.");
+  if (
+    !(await requireCommandRole(
+      ctx,
+      canApprove,
+      "Only admin can approve users.",
+    ))
+  ) {
     return;
   }
-
-  const value = ctx.message.text.split(" ").slice(1).join(" ").trim();
-  const userId = Number(value);
-  if (!Number.isInteger(userId)) {
-    await ctx.reply("Usage: /approve <telegram_id>");
+  const userId = await parseCommandId(ctx, "Usage: /approve <telegram_id>");
+  if (userId == null) {
     return;
   }
-
   const target = await db.getUser(userId);
   if (!target) {
     await ctx.reply("User not found. Ask them to run /start first.");
     return;
   }
-
   await db.setRole(userId, "supplier");
   await ctx.reply(`User ${userId} approved.`);
 });
 
 bot.command("makeadmin", ensureApproved, async (ctx) => {
-  if (!isOwner(ctx.state.user.role)) {
-    await ctx.reply("Only owner can grant admin role.");
+  if (
+    !(await requireCommandRole(
+      ctx,
+      isOwner,
+      "Only owner can grant admin role.",
+    ))
+  ) {
     return;
   }
-
-  const value = ctx.message.text.split(" ").slice(1).join(" ").trim();
-  const userId = Number(value);
-  if (!Number.isInteger(userId)) {
-    await ctx.reply("Usage: /makeadmin <telegram_id>");
+  const userId = await parseCommandId(ctx, "Usage: /makeadmin <telegram_id>");
+  if (userId == null) {
     return;
   }
-
   const target = await db.getUser(userId);
   if (!target) {
     await ctx.reply("User not found. Ask them to run /start first.");
     return;
   }
-
   if (target.role === "owner") {
     await ctx.reply("Owner cannot be changed.");
     return;
   }
-
   await db.setRole(userId, "admin");
   await ctx.reply(`User ${userId} is now admin.`);
 });
@@ -584,35 +164,59 @@ bot.command("addsupplier", ensureApproved, async (ctx) => {
   await beginAddSupplier(ctx, ctx.state.user.role);
 });
 
-bot.command("removeuser", ensureApproved, async (ctx) => {
-  const value = ctx.message.text.split(" ").slice(1).join(" ").trim();
-  const userId = Number(value);
-  if (!Number.isInteger(userId)) {
-    await ctx.reply("Usage: /removeuser <telegram_id>");
+bot.command("editsupplier", ensureApproved, async (ctx) => {
+  if (
+    !(await requireCommandRole(
+      ctx,
+      canManageSuppliers,
+      "Only admin can edit suppliers.",
+    ))
+  ) {
     return;
   }
+  const value = getCommandArg(ctx);
+  if (!value) {
+    await beginEditSupplierSelectById(ctx);
+    return;
+  }
+  const supplierId = Number(value);
+  if (!Number.isInteger(supplierId)) {
+    await ctx.reply("Usage: /editsupplier <supplier_id>");
+    return;
+  }
+  editSupplierSelectFlow.delete(ctx.from.id);
+  editSupplierFlow.delete(ctx.from.id);
+  await openSupplierEditMenu(ctx, supplierId);
+});
 
+bot.command("removeuser", ensureApproved, async (ctx) => {
+  const userId = await parseCommandId(ctx, "Usage: /removeuser <telegram_id>");
+  if (userId == null) {
+    return;
+  }
   await promptRemoveUserConfirmation(ctx, userId);
 });
 
 bot.command("deletesupplier", ensureApproved, async (ctx) => {
-  if (!canManageSuppliers(ctx.state.user.role)) {
-    await ctx.reply("Only admin can delete suppliers.");
+  if (
+    !(await requireCommandRole(
+      ctx,
+      canManageSuppliers,
+      "Only admin can delete suppliers.",
+    ))
+  ) {
     return;
   }
-
-  const value = ctx.message.text.split(" ").slice(1).join(" ").trim();
+  const value = getCommandArg(ctx);
   if (!value) {
     await beginDeleteSupplier(ctx);
     return;
   }
-
   const supplierId = Number(value);
   if (!Number.isInteger(supplierId)) {
     await ctx.reply("Usage: /deletesupplier <supplier_id>");
     return;
   }
-
   await promptRemoveSupplierConfirmation(ctx, supplierId);
 });
 
@@ -621,474 +225,129 @@ bot.command("leave", async (ctx) => {
 });
 
 bot.command("cancel", ensureApproved, async (ctx) => {
-  addFlow.delete(ctx.from.id);
-  searchFlow.delete(ctx.from.id);
-  deleteSupplierFlow.delete(ctx.from.id);
+  clearUserFlows(ctx.from.id);
   await ctx.reply("Action cancelled.");
 });
 
 bot.command("listadmins", ensureApproved, async (ctx) => {
-  if (!canApprove(ctx.state.user.role)) {
-    await ctx.reply("Only admin can view admin list.");
+  if (
+    !(await requireCommandRole(
+      ctx,
+      canApprove,
+      "Only admin can view admin list.",
+    ))
+  ) {
     return;
   }
-
   const owner = await db.listUsersByRole("owner");
   const admins = await db.listUsersByRole("admin");
   const rows = [...owner, ...admins];
-
   if (rows.length === 0) {
     await ctx.reply("No admins found.");
     return;
   }
-
   const lines = rows.map(
     (u) => `${u.fullName} (ID: ${u.telegramId}, @${u.username || "-"})`,
   );
   await ctx.reply(lines.join("\n"));
 });
 
+// ─── Keyboard buttons ─────────────────────────────────────────────────────────
+
 bot.hears("Browse suppliers", ensureApproved, async (ctx) => {
   const buttons = await categoryButtons(null, "browse");
   await ctx.reply("Select category:", Markup.inlineKeyboard(buttons));
 });
+bot.hears("Search suppliers", ensureApproved, (ctx) => askSearchMode(ctx));
+bot.hears("Pending users", ensureApproved, (ctx) =>
+  showPendingUsers(ctx, ctx.state.user.role),
+);
+bot.hears("Users", ensureApproved, (ctx) => showManageableUsers(ctx));
+bot.hears("Add supplier", ensureApproved, (ctx) =>
+  beginAddSupplier(ctx, ctx.state.user.role),
+);
+bot.hears("Edit supplier", ensureApproved, (ctx) =>
+  beginEditSupplierSelectById(ctx),
+);
+bot.hears("Delete supplier", ensureApproved, (ctx) => beginDeleteSupplier(ctx));
+bot.hears("Leave bot", (ctx) => leaveBot(ctx));
+bot.hears("Help", ensureApproved, (ctx) => showHelp(ctx, ctx.state.user));
 
-bot.hears("Search suppliers", ensureApproved, async (ctx) => {
-  await askSearchMode(ctx);
-});
+// ─── Text input ───────────────────────────────────────────────────────────────
 
-bot.hears("Pending users", ensureApproved, async (ctx) => {
-  await showPendingUsers(ctx, ctx.state.user.role);
-});
-
-bot.hears("Users", ensureApproved, async (ctx) => {
-  await showManageableUsers(ctx);
-});
-
-bot.hears("Add supplier", ensureApproved, async (ctx) => {
-  await beginAddSupplier(ctx, ctx.state.user.role);
-});
-
-bot.hears("Delete supplier", ensureApproved, async (ctx) => {
-  await beginDeleteSupplier(ctx);
-});
-
-bot.hears("Leave bot", async (ctx) => {
-  await leaveBot(ctx);
-});
-
-bot.hears("Help", ensureApproved, async (ctx) => {
-  await showHelp(ctx, ctx.state.user);
-});
-
-bot.on("text", ensureApproved, async (ctx, next) => {
-  const flow = addFlow.get(ctx.from.id);
-  if (!flow) {
-    if (deleteSupplierFlow.has(ctx.from.id)) {
-      const supplierId = Number(ctx.message.text.trim());
-      if (!Number.isInteger(supplierId)) {
-        await ctx.reply(
-          "Supplier ID must be a number. Send supplier ID or /cancel.",
-        );
-        return;
-      }
-
-      deleteSupplierFlow.delete(ctx.from.id);
-      await promptRemoveSupplierConfirmation(ctx, supplierId);
-      return;
-    }
-
-    const mode = searchFlow.get(ctx.from.id);
-    if (mode) {
-      searchFlow.delete(ctx.from.id);
-      await runSupplierSearch(ctx, ctx.message.text, mode);
-      return;
-    }
-
-    await ctx.reply(
-      "I did not understand this message. Please choose one of the actions below.",
-    );
-    await openMainMenu(ctx);
-    return;
-  }
-
-  if (!canApprove(ctx.state.user.role)) {
-    addFlow.delete(ctx.from.id);
-    await ctx.reply("Only admin can add suppliers.");
-    return;
-  }
-
+bot.on("text", ensureApproved, async (ctx) => {
+  const { id } = ctx.from;
   const text = ctx.message.text.trim();
 
-  if (flow.step === "name") {
-    if (!text) {
-      await ctx.reply("Name cannot be empty. Send supplier name.");
+  const addFlowData = addFlow.get(id);
+  if (addFlowData) {
+    if (!canApprove(ctx.state.user.role)) {
+      addFlow.delete(id);
+      await ctx.reply("Only admin can add suppliers.");
       return;
     }
-    flow.name = text;
-    flow.step = "maker";
-    addFlow.set(ctx.from.id, flow);
-    await ctx.reply("Send maker (optional). Send '-' to skip.");
+    await handleAddSupplierText(ctx, addFlowData, text);
     return;
   }
 
-  if (flow.step === "maker") {
-    if (isSkipValue(text)) {
-      flow.maker = null;
-    } else {
-      flow.maker = text;
-    }
-    flow.step = "email";
-    addFlow.set(ctx.from.id, flow);
-    await ctx.reply("Send supplier email.");
-    return;
-  }
-
-  if (flow.step === "email") {
-    if (!text.includes("@")) {
-      await ctx.reply("Invalid email. Send again.");
+  const editFlow = editSupplierFlow.get(id);
+  if (editFlow && editFlow.step === "field") {
+    if (!canManageSuppliers(ctx.state.user.role)) {
+      editSupplierFlow.delete(id);
+      await ctx.reply("Only admin can edit suppliers.");
       return;
     }
-    flow.email = text;
-    flow.step = "phone";
-    addFlow.set(ctx.from.id, flow);
-    await ctx.reply("Send supplier phone number (optional). Send '-' to skip.");
+    await handleEditSupplierText(ctx, editFlow, text);
     return;
   }
 
-  if (flow.step === "phone") {
-    if (isSkipValue(text)) {
-      flow.phone = null;
-    } else {
-      flow.phone = text;
+  if (editSupplierSelectFlow.has(id)) {
+    if (!canManageSuppliers(ctx.state.user.role)) {
+      editSupplierSelectFlow.delete(id);
+      await ctx.reply("Only admin can edit suppliers.");
+      return;
     }
-    flow.step = "remarks";
-    addFlow.set(ctx.from.id, flow);
-
-    await ctx.reply(
-      "Send remarks (optional). Example: Egypt only. Send '-' to skip.",
-    );
-    return;
-  }
-
-  if (flow.step === "remarks") {
-    if (isSkipValue(text)) {
-      flow.remarks = null;
-    } else {
-      flow.remarks = text;
-    }
-
-    flow.step = "currency";
-    addFlow.set(ctx.from.id, flow);
-    await ctx.reply("Send payment currency (optional). Example: USD. Send '-' to skip.");
-    return;
-  }
-
-  if (flow.step === "currency") {
-    if (isSkipValue(text)) {
-      flow.currency = null;
-    } else {
-      flow.currency = text;
-    }
-
-    flow.step = "paymentTerms";
-    addFlow.set(ctx.from.id, flow);
-    await ctx.reply(
-      "Send payment terms (optional). Example: credit / prepayment. Send '-' to skip.",
-    );
-    return;
-  }
-
-  if (flow.step === "paymentTerms") {
-    if (isSkipValue(text)) {
-      flow.paymentTerms = null;
-    } else {
-      flow.paymentTerms = text;
-    }
-
-    flow.step = "category";
-    addFlow.set(ctx.from.id, flow);
-
-    const buttons = await categoryButtons(null, "addcat");
-    await ctx.reply(
-      "Choose category for this supplier:",
-      Markup.inlineKeyboard(buttons),
-    );
-    return;
-  }
-});
-
-bot.action(/^(browse|addcat):(\d+)$/, ensureApproved, async (ctx) => {
-  const mode = ctx.match[1];
-  const categoryId = Number(ctx.match[2]);
-  const category = await db.getCategory(categoryId);
-
-  if (!category) {
-    await ctx.answerCbQuery("Category not found");
-    return;
-  }
-
-  const children = await db.getChildren(categoryId);
-  const isLeaf = children.length === 0;
-
-  if (mode === "browse" && isLeaf) {
-    await ctx.answerCbQuery();
-    const suppliers = await db.getSuppliersByCategory(categoryId);
-    const backKeyboard = Markup.inlineKeyboard([
-      [Markup.button.callback("Back to root", "browse_root")],
-    ]);
-    if (suppliers.length === 0) {
-      await ctx.editMessageText(
-        `No suppliers in ${escapeHtml(category.name)}.`,
-        backKeyboard,
+    const supplierId = Number(text);
+    if (!Number.isInteger(supplierId)) {
+      await ctx.reply(
+        "Supplier ID must be a number. Send supplier ID or /cancel.",
       );
       return;
     }
-    const includeAdminControls = canManageSuppliers(ctx.state.user.role);
-    const lines = await Promise.all(
-      suppliers.map((s) =>
-        renderSupplier(s, { includeId: includeAdminControls }),
-      ),
-    );
-    await ctx.editMessageText(
-      `Suppliers in ${escapeHtml(category.name)}:\n\n${lines.join("\n\n")}`,
-      { parse_mode: "HTML", ...backKeyboard },
-    );
+    editSupplierSelectFlow.delete(id);
+    await openSupplierEditMenu(ctx, supplierId);
     return;
   }
 
-  const buttons = children.map((child) => [
-    Markup.button.callback(child.name, `${mode}:${child.id}`),
-  ]);
-  buttons.push(...addChooseButtons(categoryId, mode, isLeaf));
-
-  await ctx.editMessageText(
-    isLeaf
-      ? `Category: ${category.name}\nThis is the final category. You can select it.`
-      : `Category: ${category.name}\nChoose one of the subcategories (final path required).`,
-    Markup.inlineKeyboard(buttons),
-  );
-  await ctx.answerCbQuery();
-});
-
-bot.action(/^(browse|addcat)_root$/, ensureApproved, async (ctx) => {
-  const mode = ctx.match[1];
-  const buttons = await categoryButtons(null, mode);
-  await ctx.editMessageText("Select category:", Markup.inlineKeyboard(buttons));
-  await ctx.answerCbQuery();
-});
-
-bot.action(/^approve:(\d+)$/, ensureApproved, async (ctx) => {
-  if (!canApprove(ctx.state.user.role)) {
-    await ctx.answerCbQuery("Forbidden");
+  if (deleteSupplierFlow.has(id)) {
+    const supplierId = Number(text);
+    if (!Number.isInteger(supplierId)) {
+      await ctx.reply(
+        "Supplier ID must be a number. Send supplier ID or /cancel.",
+      );
+      return;
+    }
+    deleteSupplierFlow.delete(id);
+    await promptRemoveSupplierConfirmation(ctx, supplierId);
     return;
   }
 
-  const userId = Number(ctx.match[1]);
-  const target = await db.getUser(userId);
-  if (!target) {
-    await ctx.answerCbQuery("User not found");
+  const searchMode = searchFlow.get(id);
+  if (searchMode) {
+    searchFlow.delete(id);
+    await runSupplierSearch(ctx, text, searchMode);
     return;
   }
 
-  await db.setRole(userId, "supplier");
-  await ctx.editMessageText(`Approved: ${target.fullName} (${userId})`);
-  await ctx.answerCbQuery("Approved");
-});
-
-bot.action(/^makeadmin:(\d+)$/, ensureApproved, async (ctx) => {
-  if (!isOwner(ctx.state.user.role)) {
-    await ctx.answerCbQuery("Only owner can do this");
-    return;
-  }
-
-  const userId = Number(ctx.match[1]);
-  const target = await db.getUser(userId);
-  if (!target) {
-    await ctx.answerCbQuery("User not found");
-    return;
-  }
-
-  if (target.role === "owner") {
-    await ctx.answerCbQuery("Cannot change owner");
-    return;
-  }
-
-  await db.setRole(userId, "admin");
-  await ctx.editMessageText(`Now admin: ${target.fullName} (${userId})`);
-  await ctx.answerCbQuery("Updated");
-});
-
-bot.action(/^removeuser:(\d+)$/, ensureApproved, async (ctx) => {
-  const userId = Number(ctx.match[1]);
-  const ok = await promptRemoveUserConfirmation(ctx, userId, {
-    editCurrentMessage: true,
-  });
-  await ctx.answerCbQuery(ok ? "Confirm action" : "Failed");
-});
-
-bot.action(/^removeconfirm:(\d+)$/, ensureApproved, async (ctx) => {
-  const userId = Number(ctx.match[1]);
-  const actor = ctx.state.user;
-  const target = await db.getUser(userId);
-
-  if (!canManageUsers(actor.role)) {
-    await ctx.answerCbQuery("Forbidden");
-    return;
-  }
-
-  if (!target) {
-    await ctx.editMessageText("User not found.");
-    await ctx.answerCbQuery("Not found");
-    return;
-  }
-
-  if (!canRemoveTarget(actor, target)) {
-    await ctx.editMessageText("You cannot remove this user.");
-    await ctx.answerCbQuery("Forbidden");
-    return;
-  }
-
-  addFlow.delete(userId);
-  searchFlow.delete(userId);
-  await db.removeUser(userId);
-  await ctx.editMessageText(`Removed from bot: ${target.fullName} (${userId})`);
-  await ctx.answerCbQuery("Removed");
-});
-
-bot.action(/^removecancel:(\d+)$/, ensureApproved, async (ctx) => {
-  await ctx.editMessageText("Removal canceled.");
-  await ctx.answerCbQuery("Canceled");
-});
-
-bot.action(/^deletesupplier:(\d+)$/, ensureApproved, async (ctx) => {
-  const supplierId = Number(ctx.match[1]);
-  const ok = await promptRemoveSupplierConfirmation(ctx, supplierId, {
-    editCurrentMessage: true,
-  });
-  await ctx.answerCbQuery(ok ? "Confirm action" : "Failed");
-});
-
-bot.action(/^delsupplierconfirm:(\d+)$/, ensureApproved, async (ctx) => {
-  if (!canManageSuppliers(ctx.state.user.role)) {
-    await ctx.answerCbQuery("Forbidden");
-    return;
-  }
-
-  const supplierId = Number(ctx.match[1]);
-  const supplier = await db.getSupplierById(supplierId);
-  if (!supplier) {
-    await ctx.editMessageText("Supplier not found.");
-    await ctx.answerCbQuery("Not found");
-    return;
-  }
-
-  await db.removeSupplier(supplierId);
-  await ctx.editMessageText(
-    `Supplier deleted: #${supplier.id} ${supplier.name}`,
-  );
-  await ctx.answerCbQuery("Deleted");
-});
-
-bot.action(/^delsuppliercancel:(\d+)$/, ensureApproved, async (ctx) => {
-  await ctx.editMessageText("Supplier deletion canceled.");
-  await ctx.answerCbQuery("Canceled");
-});
-
-bot.action(/^searchmode:(name|maker)$/, ensureApproved, async (ctx) => {
-  const mode = ctx.match[1];
-  searchFlow.set(ctx.from.id, mode);
-
-  const prompt =
-    mode === "name"
-      ? "Send supplier name for search."
-      : "Send maker for search.";
-
-  await ctx.editMessageText(prompt);
-  await ctx.answerCbQuery("Mode selected");
-});
-
-bot.action(/^browse_choose:(\d+)$/, ensureApproved, async (ctx) => {
-  const categoryId = Number(ctx.match[1]);
-  const category = await db.getCategory(categoryId);
-
-  if (!category) {
-    await ctx.answerCbQuery("Category not found");
-    return;
-  }
-
-  if ((await db.getChildren(categoryId)).length > 0) {
-    await ctx.answerCbQuery("Choose a final subcategory");
-    return;
-  }
-
-  const suppliers = await db.getSuppliersByCategory(categoryId);
-  if (suppliers.length === 0) {
-    await ctx.reply(`No suppliers in ${category.name}.`);
-    await ctx.answerCbQuery();
-    return;
-  }
-
-  const includeAdminControls = canManageSuppliers(ctx.state.user.role);
-  const lines = await Promise.all(
-    suppliers.map((supplier) =>
-      renderSupplier(supplier, {
-        includeId: includeAdminControls,
-      }),
-    ),
-  );
   await ctx.reply(
-    `Suppliers in ${escapeHtml(category.name)}:\n\n${lines.join("\n\n")}`,
-    {
-      parse_mode: "HTML",
-    },
+    "I did not understand this message. Please choose one of the actions below.",
   );
-  await ctx.answerCbQuery();
+  await openMainMenu(ctx);
 });
 
-bot.action(/^addcat_choose:(\d+)$/, ensureApproved, async (ctx) => {
-  if (!canApprove(ctx.state.user.role)) {
-    await ctx.answerCbQuery("Only admin can add suppliers");
-    return;
-  }
+registerInlineActions(bot);
 
-  const flow = addFlow.get(ctx.from.id);
-  if (!flow || flow.step !== "category") {
-    await ctx.answerCbQuery("No active add flow");
-    return;
-  }
-
-  const categoryId = Number(ctx.match[1]);
-  const category = await db.getCategory(categoryId);
-
-  if (!category) {
-    await ctx.answerCbQuery("Category not found");
-    return;
-  }
-
-  if ((await db.getChildren(categoryId)).length > 0) {
-    await ctx.answerCbQuery("Choose a final subcategory");
-    return;
-  }
-
-  await db.addSupplier({
-    name: flow.name,
-    maker: flow.maker || null,
-    remarks: flow.remarks || null,
-    currency: flow.currency || null,
-    paymentTerms: flow.paymentTerms || null,
-    categoryId,
-    emailEncrypted: encryptText(flow.email, config.contactsSecret),
-    phoneEncrypted: flow.phone
-      ? encryptText(flow.phone, config.contactsSecret)
-      : null,
-    createdBy: ctx.from.id,
-  });
-
-  addFlow.delete(ctx.from.id);
-  await ctx.reply(`Supplier added to ${category.name}.`);
-  await ctx.answerCbQuery("Saved");
-});
+// ─── Error handler & launch ───────────────────────────────────────────────────
 
 bot.catch(async (err, ctx) => {
   console.error("Bot error:", err);

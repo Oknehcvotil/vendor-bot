@@ -381,6 +381,58 @@ function initDb(connectionString) {
     return toSupplier(rows[0]);
   }
 
+  async function updateSupplier(supplierId, updates) {
+    await ready;
+
+    const allowedColumns = {
+      name: "name",
+      maker: "maker",
+      remarks: "remarks",
+      currency: "currency",
+      paymentTerms: "payment_terms",
+      categoryId: "category_id",
+      emailEncrypted: "email_encrypted",
+      phoneEncrypted: "phone_encrypted",
+    };
+
+    const entries = Object.entries(updates || {}).filter(
+      ([, value]) => value !== undefined,
+    );
+    if (entries.length === 0) {
+      return getSupplierById(supplierId);
+    }
+
+    const setClauses = [];
+    const params = [];
+
+    for (const [key, value] of entries) {
+      const column = allowedColumns[key];
+      if (!column) {
+        continue;
+      }
+
+      params.push(value);
+      setClauses.push(`${column} = $${params.length}`);
+    }
+
+    if (setClauses.length === 0) {
+      return getSupplierById(supplierId);
+    }
+
+    params.push(supplierId);
+    const { rows } = await pool.query(
+      `
+      UPDATE suppliers
+      SET ${setClauses.join(", ")}
+      WHERE id = $${params.length}
+      RETURNING id, name, maker, remarks, currency, payment_terms, category_id, email_encrypted, phone_encrypted, created_by, created_at
+      `,
+      params,
+    );
+
+    return toSupplier(rows[0]);
+  }
+
   async function searchSuppliers(query, mode = "any") {
     await ready;
     const needle = query.trim();
@@ -450,6 +502,7 @@ function initDb(connectionString) {
     getSuppliersByCategory,
     getSupplierById,
     removeSupplier,
+    updateSupplier,
     searchSuppliers,
     getCategoryPath,
   };
